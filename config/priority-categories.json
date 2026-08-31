@@ -1,0 +1,9 @@
+{
+  "_comment": "Discovery priority order. Institutions matching earlier categories are discovered/processed first when a --count limit is applied.",
+  "order": [
+    { "category": "LANGUAGES", "label": "English / IELTS" },
+    { "category": "SCHOOL_SUBJECTS", "label": "School subjects" },
+    { "category": "UNIVERSITY_PREP", "label": "University entrance prep" },
+    { "category": "KIDS_EDUCATION", "label": "Kids development" }
+  ]
+}

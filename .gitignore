@@ -1,0 +1,27 @@
+node_modules/
+dist/
+.env
+*.log
+
+# Real pipeline run artifacts (never commit real scraped/research/export data).
+# Fixtures are the one exception and stay tracked.
+data/cache/*
+!data/cache/.gitkeep
+data/discovered/*
+!data/discovered/.gitkeep
+data/research/*
+!data/research/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/review/*
+!data/review/.gitkeep
+data/rejected/*
+!data/rejected/.gitkeep
+data/export/*
+!data/export/.gitkeep
+data/state/*
+!data/state/.gitkeep
+
+# fixtures ARE tracked (synthetic/test data only)
+!data/fixtures/
+!data/fixtures/**

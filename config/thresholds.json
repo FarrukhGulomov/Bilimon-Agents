@@ -1,0 +1,11 @@
+{
+  "_comment": "Score cutoffs for the quality gate. qualityScore is 0-100, combining sourceConfidence and dataCompleteness (see src/services/scoring.ts). These thresholds are configurable and match the spec's stated bands.",
+  "APPROVED": 85,
+  "APPROVED_WITH_WARNINGS": 70,
+  "NEEDS_REVIEW": 50,
+  "REJECTED": 0,
+  "weights": {
+    "sourceConfidence": 0.5,
+    "dataCompleteness": 0.5
+  }
+}
