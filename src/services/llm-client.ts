@@ -172,9 +172,36 @@ export async function webSearchAndSummarize(query: string, instructions: string)
   recordUsage(response.usage);
   const text = response.output_text;
   if (!text) return [];
+  let parsed: unknown;
   try {
-    return JSON.parse(extractJson(text)) as WebSearchResultItem[];
+    parsed = JSON.parse(extractJson(text));
   } catch {
     return [];
   }
+  return coerceToResultArray(parsed);
+}
+
+// Models don't always honor "respond with ONLY a JSON array" literally —
+// a common failure mode is wrapping the array in an object (e.g.
+// {"results": [...]}, {"institutions": [...]}) or, when nothing was
+// found, returning {} or a single object instead of []. Real-world crash
+// observed: an un-coerced non-array reaching `.map()` in
+// services/search.ts threw "results.map is not a function" and crashed
+// the whole pipeline run. Never let a malformed model response take down
+// the process — unwrap known wrapper shapes, otherwise treat it as "no
+// results found" rather than a fatal error.
+export function coerceToResultArray(value: unknown): WebSearchResultItem[] {
+  if (Array.isArray(value)) return value as WebSearchResultItem[];
+  if (value && typeof value === "object") {
+    for (const key of ["results", "items", "institutions", "data"]) {
+      const candidate = (value as Record<string, unknown>)[key];
+      if (Array.isArray(candidate)) return candidate as WebSearchResultItem[];
+    }
+  }
+  console.warn(
+    "webSearchAndSummarize: model response was not a JSON array (and no known wrapper key matched) — " +
+      "treating as zero results instead of crashing. Raw parsed value:",
+    JSON.stringify(value).slice(0, 500)
+  );
+  return [];
 }

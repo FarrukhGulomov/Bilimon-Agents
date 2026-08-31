@@ -22,7 +22,7 @@ import { deterministicDedupe } from "../src/services/deduplicator.js";
 import { validateRecord } from "../src/services/validator.js";
 import { BilimOnExportRecordZ } from "../src/schemas/bilimon-export.zod.js";
 import { runWithConcurrency } from "../src/services/concurrency.js";
-import { getTokenUsage, resetTokenUsage, recordUsage } from "../src/services/llm-client.js";
+import { getTokenUsage, resetTokenUsage, recordUsage, coerceToResultArray } from "../src/services/llm-client.js";
 import { resolveBriefHeuristic, loadDefaultScope, resolveBrief } from "../src/services/brief-parser.js";
 import { discoverMock } from "../src/agents/discovery.js";
 import type { BilimOnExportRecord } from "../src/types/index.js";
@@ -375,6 +375,30 @@ console.log("9. --mock discovery filters/prioritizes fixtures by the resolved Di
   const broadScope = resolveBriefHeuristic("top o'quv markazlari haqida ma'lumot tayyorla");
   const broadResult = discoverMock(40, broadScope);
   assert(broadResult.length === 40, `an unscoped/broad brief resolves to "all" and returns all 40 fixtures (got ${broadResult.length})`);
+}
+
+console.log("10. coerceToResultArray never lets a malformed LLM response crash the caller with .map()");
+{
+  // Real production crash (Railway, 2026-08-31): "TypeError: results.map is
+  // not a function" when the model wrapped its array in an object instead
+  // of returning a bare JSON array. These assertions pin the fix.
+  assert(
+    JSON.stringify(coerceToResultArray([{ title: "a", url: "b" }])) === JSON.stringify([{ title: "a", url: "b" }]),
+    "a bare array passes through unchanged"
+  );
+  assert(
+    JSON.stringify(coerceToResultArray({ results: [{ title: "a", url: "b" }] })) ===
+      JSON.stringify([{ title: "a", url: "b" }]),
+    'unwraps a {"results": [...]} wrapper'
+  );
+  assert(
+    JSON.stringify(coerceToResultArray({ institutions: [{ title: "a", url: "b" }] })) ===
+      JSON.stringify([{ title: "a", url: "b" }]),
+    'unwraps a {"institutions": [...]} wrapper'
+  );
+  assert(JSON.stringify(coerceToResultArray({})) === "[]", "an empty object coerces to [] instead of crashing");
+  assert(JSON.stringify(coerceToResultArray(null)) === "[]", "null coerces to []");
+  assert(JSON.stringify(coerceToResultArray("not json-shaped")) === "[]", "a bare string coerces to []");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
