@@ -158,7 +158,13 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
   ensureDirs();
   const scope = await resolveBrief(opts.brief);
   persistLastScope(scope);
+  if (!opts.mock) {
+    console.log("Discovery: running live web search (this can take a while — no OpenAI call in this pipeline has a client-side timeout yet, so a stalled network request looks identical to a slow one)...");
+  }
   const candidates = await runDiscovery(opts.count, opts.mock, scope);
+  if (!opts.mock) {
+    console.log(`Discovery: found ${candidates.length} raw candidate(s) before dedupe.`);
+  }
   const { survivors, mergedAwayIds } = dedupeCandidates(candidates);
 
   // Record duplicates in state so report.json can count them, without
