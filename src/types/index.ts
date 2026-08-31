@@ -13,6 +13,7 @@ import type {
   InstitutionType,
   LanguageCode,
 } from "../schemas/enums.js";
+import type { DiscoveryScope } from "../services/brief-parser.js";
 
 export type PipelineState =
   | "DISCOVERED"
@@ -154,14 +155,15 @@ export type BranchRecord = unknown;
 /** The REAL BilimOn export record shape (see README.md "Schema status: REAL"). */
 export interface BilimOnExportRecord {
   /**
-   * OPEN QUESTION for the user to confirm against BilimOn's real
-   * backend/import mechanism: the 302 real records all carry cuid-style ids
-   * (e.g. "cmrfw8t5o001an3ogocewc8g6") that look auto-assigned on insert,
-   * not client-supplied. We cannot inspect BilimOn's real import code from
-   * this data export alone, so this pipeline defaults to NOT fabricating a
-   * fake-looking cuid: exported records leave `id` null and let BilimOn's
-   * own import assign the real id. If BilimOn's import instead requires a
-   * client-supplied cuid, generate one here and update this comment.
+   * CONFIRMED design decision (2026-08-31): BilimOn's own backend assigns
+   * the real cuid `id` when a record is imported — this pipeline never
+   * generates or guesses one. The 302 real reference records all carry
+   * cuid-style ids (e.g. "cmrfw8t5o001an3ogocewc8g6") that look
+   * auto-assigned on insert, and the user confirmed this is in fact how
+   * BilimOn's real import mechanism works, not just a plausible guess from
+   * the data shape alone. Every record this pipeline exports therefore
+   * leaves `id: null` and relies on BilimOn's own import to assign the real
+   * id — see agents/bilimon-exporter.ts::buildExportRecord.
    * Pipeline-internal state tracking uses a separate, clearly-prefixed id
    * (see StateRecord.id / services/normalizer.ts::generateId) — never this field.
    */
@@ -218,5 +220,11 @@ export interface ExportReport {
    * figure; compute cost yourself against current OpenAI pricing for
    * whichever OPENAI_MODEL was used. */
   estimatedTokenUsage: { inputTokens: number; outputTokens: number; calls: number };
+  /** The DiscoveryScope (src/services/brief-parser.ts) that produced this
+   * batch — records which --brief (if any) was used and what it resolved to
+   * (types/categories/keywords/source), so a human reviewing a run later can
+   * see what was requested. null only if no run has ever persisted a scope
+   * (e.g. a fresh checkout's first `pipeline export` before any `run`). */
+  resolvedScope: DiscoveryScope | null;
   generatedAt: string;
 }

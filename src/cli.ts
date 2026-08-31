@@ -2,7 +2,10 @@
 /**
  * CLI entrypoint.
  *
- *   pipeline run --count N [--mock]   (N is an arbitrary batch size, e.g. 5, 20, 200, ...)
+ *   pipeline run --count N [--mock] [--brief "<free text>"]
+ *     (N is an arbitrary batch size, e.g. 5, 20, 200, ...; --brief is
+ *     optional free text like "top IELTS markazlari" or "barcha maktablar" —
+ *     see services/brief-parser.ts and README.md "Brief-driven discovery")
  *   pipeline validate
  *   pipeline export
  */
@@ -44,21 +47,29 @@ function isMock(flags: Record<string, string | boolean>): boolean {
 async function cmdRun(flags: Record<string, string | boolean>) {
   const count = Number(flags.count ?? 5);
   const mock = isMock(flags);
+  const brief = typeof flags.brief === "string" ? flags.brief : undefined;
   if (!mock && !process.env.OPENAI_API_KEY) {
     console.error(new MissingApiKeyError().message);
     process.exitCode = 1;
     return;
   }
-  console.log(`Running pipeline: count=${count} mock=${mock}`);
+  console.log(`Running pipeline: count=${count} mock=${mock}${brief ? ` brief="${brief}"` : ""}`);
   const summary = await runPipeline({
     count,
     mock,
+    brief,
     onProgress: (p) =>
       console.log(
         `progress: processed ${p.completed}/${p.total}, approved ${p.approved}, ` +
           `needs_review ${p.needsReview}, rejected ${p.rejected}, duplicates ${p.duplicates}`
       ),
   });
+  console.log(
+    `Resolved scope (source=${summary.resolvedScope.source}): ` +
+      `types=${JSON.stringify(summary.resolvedScope.types)}, ` +
+      `categories=${JSON.stringify(summary.resolvedScope.categories)}` +
+      (summary.resolvedScope.keywords.length ? `, keywords=${JSON.stringify(summary.resolvedScope.keywords)}` : "")
+  );
   console.log(
     `Discovery+dedupe: ${summary.processedIds.length} unique candidates processed, ` +
       `${summary.duplicateIds.length} duplicates merged away.`
@@ -120,7 +131,7 @@ async function main() {
         cmdExport();
         break;
       default:
-        console.log("Usage: pipeline <run|validate|export> [--count N] [--mock]");
+        console.log('Usage: pipeline <run|validate|export> [--count N] [--mock] [--brief "<free text>"]');
         process.exitCode = command ? 1 : 0;
     }
   } catch (err) {

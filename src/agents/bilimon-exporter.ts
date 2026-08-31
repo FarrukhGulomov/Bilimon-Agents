@@ -18,6 +18,7 @@ import type { ContentResult } from "./content-manager.js";
 import { resolveCity } from "../services/location-mapper.js";
 import { normalizePhone } from "../services/normalizer.js";
 import { getTokenUsage } from "../services/llm-client.js";
+import { readLastScope } from "../services/scope-store.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXPORT_DIR = join(__dirname, "..", "..", "data", "export");
@@ -40,9 +41,10 @@ export interface BuildRecordResult {
  *
  * `id` here is the pipeline-internal id (see services/normalizer.ts) used
  * only for state/processed/review filenames — it is deliberately NOT
- * written into the returned record's `id` field; see BilimOnExportRecord.id
- * in src/types/index.ts for the open question on BilimOn's real id
- * convention that this defaults against.
+ * written into the returned record's `id` field. CONFIRMED convention (see
+ * BilimOnExportRecord.id in src/types/index.ts): BilimOn's own backend
+ * assigns the real cuid `id` when a record is imported, so this pipeline
+ * never generates or guesses one — every exported record leaves `id: null`.
  */
 export function buildExportRecord(
   id: string,
@@ -80,7 +82,7 @@ export function buildExportRecord(
   }
 
   const record: BilimOnExportRecord = {
-    id: null, // see doc comment on BilimOnExportRecord.id — open question, not yet fabricated
+    id: null, // CONFIRMED: BilimOn assigns id on import — see doc comment on BilimOnExportRecord.id
     nameUz: fields.nameUz ?? fields.nameLatin!,
     nameRu: fields.nameRu ?? fields.nameUz ?? fields.nameLatin!,
     nameKey,
@@ -194,6 +196,7 @@ export function exportFinalArtifacts(): { importPath: string; reportPath: string
     averageCompleteness: scoredCount > 0 ? Math.round(completenessSum / scoredCount) : 0,
     averageConfidence: scoredCount > 0 ? Math.round(confidenceSum / scoredCount) : 0,
     estimatedTokenUsage: getTokenUsage(),
+    resolvedScope: readLastScope(),
     generatedAt: new Date().toISOString(),
   };
   const reportPath = join(EXPORT_DIR, "report.json");
