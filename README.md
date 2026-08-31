@@ -78,17 +78,18 @@ in all 302 real records, so their real per-element schema is genuinely
 unconfirmed — kept as `unknown[]` rather than carrying forward an invented
 shape.
 
-**Open question for the user**: the 302 real records all carry cuid-style
-`id`s (e.g. `cmrfw8t5o001an3ogocewc8g6`) that look auto-assigned on insert
-rather than client-supplied — but this data export alone can't confirm
-BilimOn's real import mechanism. This pipeline therefore defaults to
-**not** fabricating a fake-looking cuid: exported records leave `id: null`
-and rely on BilimOn's own import to assign the real id. If BilimOn's real
-import instead requires a client-supplied cuid, that default needs to
-change — see the doc comment on `BilimOnExportRecord.id` in
-`src/types/index.ts` and `services/normalizer.ts::generateId` (the
-separate, clearly `pipeline-`-prefixed id used only for this pipeline's own
-internal state tracking, never written to the exported record).
+**`id` field convention — CONFIRMED**: the 302 real records all carry
+cuid-style `id`s (e.g. `cmrfw8t5o001an3ogocewc8g6`). The user has confirmed
+that **BilimOn's own backend assigns this `id` when a record is imported** —
+this pipeline never generates or guesses a real cuid. Every record this
+pipeline exports therefore leaves `id: null` and relies on BilimOn's own
+import to assign the real id — see the doc comment on
+`BilimOnExportRecord.id` in `src/types/index.ts` and
+`agents/bilimon-exporter.ts::buildExportRecord`. This is no longer an open
+question. Pipeline-internal state tracking uses a separate, clearly
+`pipeline-`-prefixed id (`services/normalizer.ts::generateId`) used only to
+key `data/state|processed|review/<id>.json` — that id is never written to
+the exported record's `id` field.
 
 ## Fixtures vs. real data
 
@@ -188,7 +189,9 @@ src/
   schemas/          REAL BilimOn schema, enum registry, zod validator, location seed table
   agents/           orchestrator, discovery, researcher, content-manager, bilimon-exporter
   services/         search, scraper, extractor, deduplicator, normalizer, validator,
-                     location-mapper, scoring, llm-client (OpenAI SDK wrapper)
+                     location-mapper, scoring, llm-client (OpenAI SDK wrapper),
+                     brief-parser (free-text brief -> DiscoveryScope), scope-store
+                     (persists the last resolved scope for report.json)
   cli.ts            `pipeline run|validate|export`
 
 config/
@@ -231,10 +234,12 @@ PIPELINE_MAX_CONCURRENCY=10 npx tsx src/cli.ts run --count 200
   from `data/fixtures/*` instead of calling the LLM/web search — no
   `OPENAI_API_KEY` needed. This is the only path validated by actually
   running it in this build environment.
-- `pipeline run --count N` discovers up to N raw candidates (fixture rows
-  in mock mode, live search results in real mode), dedupes them, runs them
-  through research → content → export → scoring, and writes
-  `data/export/bilimon-import.json` (APPROVED records only) and
+- `pipeline run --count N [--brief "<free text>"]` discovers up to N raw
+  candidates (fixture rows in mock mode, live search results in real mode)
+  scoped by the resolved brief (or the `config/priority-categories.json`
+  default when `--brief` is omitted — see "Brief-driven discovery" below),
+  dedupes them, runs them through research → content → export → scoring, and
+  writes `data/export/bilimon-import.json` (APPROVED records only) and
   `data/export/report.json`.
 - `pipeline validate` re-validates `data/export/bilimon-import.json` (or,
   if absent, everything under `data/processed/`) against
@@ -275,6 +280,94 @@ Run the unit tests with `npm test` (plain tsx script, no framework):
 ```bash
 npm test
 ```
+
+## Brief-driven discovery: a general-purpose product, not a 4-category tool
+
+Earlier versions of this pipeline scoped discovery to a fixed list —
+`config/priority-categories.json`'s 4 categories (English/IELTS, School
+subjects, University entrance prep, Kids development). That list is now
+just the **default**, not a hard limit: `pipeline run` accepts an optional
+free-text `--brief` describing what kind of institutions to discover, so
+the same pipeline works as a general-purpose product for the *entire* real
+`type`/`categories` enum space in `src/schemas/enums.ts` (schools, lyceums,
+language centers, course centers, tutoring — every category from IELTS to
+IT courses), not only the original 4 categories.
+
+```bash
+# No --brief at all: unchanged default behavior (same 4 categories as
+# before this feature existed) — existing callers/tests are unaffected.
+npx tsx src/cli.ts run --count 40 --mock
+
+# A narrow brief scopes discovery down:
+npx tsx src/cli.ts run --count 40 --mock --brief "maktablar"                     # -> type SCHOOL/LYCEUM
+npx tsx src/cli.ts run --count 40 --mock --brief "top IELTS markazlari"          # -> category IELTS
+npx tsx src/cli.ts run --count 40 --mock --brief "universitetga tayyorlov kurslari" # -> category UNIVERSITY_PREP + type COURSE_CENTER
+
+# A broad/unspecific brief resolves to the widest possible scope — every
+# real type and every real category — matching the intent of "prepare data
+# about Uzbekistan's top learning institutions" with no category named:
+npx tsx src/cli.ts run --count 40 --mock --brief "top oquv markazlari haqida ma'lumot tayyorla"
+```
+
+**How a brief resolves to a `DiscoveryScope`** (`src/services/brief-parser.ts`,
+`{ types: InstitutionType[] | "all", categories: Category[] | "all",
+regions: string[] | "all", keywords: string[] }`), in priority order:
+
+1. **No `--brief`** -> the pre-existing `config/priority-categories.json`
+   default (categories = the 4 configured values, types = `"all"`) — exact
+   same behavior as before this feature existed.
+2. **`--brief` given, `OPENAI_API_KEY` set** -> **LLM mode**: the brief and
+   the real enum lists from `src/schemas/enums.ts` are both passed to the
+   model (via `services/llm-client.ts::askStructured`) so it can only choose
+   values that actually exist in BilimOn's real schema. Any value the model
+   returns outside those real enums is dropped with a `console.warn` and
+   that dimension falls back to `"all"` rather than crashing or silently
+   narrowing to nothing. **Not exercised by execution in this build
+   environment** (no `OPENAI_API_KEY` here — "hozircha yo'q, keyinroq
+   qo'shaman") — structurally complete, same caveat as the rest of the
+   pipeline's real-mode code paths.
+3. **`--brief` given, no `OPENAI_API_KEY`** -> **heuristic mode**
+   (`resolveBriefHeuristic`): pure deterministic Uzbek/Russian/English
+   keyword matching, no network/LLM call at all. This is the mode that
+   actually runs and is validated in this environment. Examples:
+   - `maktab`/`maktablar`/`school`/`школа` -> type `SCHOOL`
+   - `litsey`/`lyceum`/`лицей` -> type `LYCEUM`
+   - `til markazi`/`language center`/`языковой центр` -> type `LANGUAGE_CENTER`
+   - `kurs`/`course`/`курс` -> type `COURSE_CENTER`
+   - `repetitor`/`tutoring`/`репетитор` -> type `TUTORING`
+   - `ielts` -> category `IELTS`; `cefr` -> `CEFR`; `sat` -> `SAT`
+   - `maktab fanlari`/`school subjects` -> category `SCHOOL_SUBJECTS`
+   - `universitetga tayyorlov`/`abituriyent`/`university prep` -> category `UNIVERSITY_PREP`
+   - `bolalar`/`kids`/`children`/`детск` -> category `KIDS_EDUCATION`
+   - `ingliz tili`/`english`/`язык` -> category `LANGUAGES`
+   - `dasturlash`/`IT kurs`/`programming` -> category `IT_COURSES`
+   - `sertifikat`/`certification` -> category `PROFESSIONAL_CERTIFICATION`
+   - A dimension with **no keyword hit** defaults to `"all"` — the broadest
+     scope — which is exactly the "cover every institution type" behavior a
+     vague/unscoped brief should produce.
+
+`src/agents/discovery.ts` uses the resolved `DiscoveryScope` in both modes:
+- **`--mock` mode**: `data/fixtures/mock-discovery.json`'s 40 synthetic
+  institutions are now each tagged with a real `type` value (in addition to
+  their existing `category`), and `discoverMock()` filters to only the
+  fixtures matching the scope's `types`/`categories` (both `"all"` means no
+  filtering — all 40, same as before). `--brief "maktablar"` visibly returns
+  only the 3 `SCHOOL`-tagged fixtures instead of all 40 — the concrete,
+  testable, no-API-key proof this works end to end (see `test/run-all.ts`
+  sections 8–9 and the validation commands below).
+- **Real (live) mode**: `discoverLive()` builds live-web-search facets from
+  the scope instead of always iterating
+  `config/priority-categories.json`'s 4 categories — a narrowed scope
+  produces fewer, more targeted searches; the default/broad scope preserves
+  the pre-existing category-only search behavior.
+
+`report.json` records which brief/scope produced a given run as
+`resolvedScope: { types, categories, regions, keywords, briefText, source }`
+(`source` is `"default" | "heuristic" | "llm" | "llm-fallback"`), persisted
+via `services/scope-store.ts` so a later `pipeline export` (which itself
+takes no `--brief`) still shows what the most recent `pipeline run` used —
+useful for a human reviewing a batch's results later without having to
+remember what was typed at the CLI.
 
 ## Production safety notes
 
@@ -326,8 +419,8 @@ blockers:
 - **Real schema ✅ resolved.** The schema, enums, and city/region ids are
   now derived from and verified against the actual 302-record BilimOn
   export (see "Schema status: REAL" above) — this is no longer a blocker.
-  One open question remains (the `id` field convention) for the user to
-  confirm with the real BilimOn backend/import mechanism.
+  The `id` field convention is also now confirmed (BilimOn assigns `id` on
+  import; see "Schema status: REAL" above) — no open questions remain here.
 - **Real city/region ids for 8 of ~14 regions ✅.** Navoiy,
   Termez/Surxondaryo, Guliston/Sirdaryo, Urganch/Xorazm, and
   Nukus/Qoraqalpog'iston have no real ids yet (see the coverage-gap note
@@ -392,7 +485,7 @@ blockers:
   no-op on outcomes (idempotency unaffected by the concurrency changes).
 - `PIPELINE_MAX_CONCURRENCY=1` override confirmed to take effect (env var
   takes priority over `config/execution.json`).
-- `npm test`: 37 assertions covering slug determinism (including two real
+- `npm test`: 55 assertions covering slug determinism (including two real
   examples from the reference export, "King's Academy" → `kings-academy`
   and "Najot Ta'lim" → `najot-talim`), phone validation, dedupe collapse,
   enum rejection, real city-alias resolution (including the coverage-gap
@@ -400,6 +493,26 @@ blockers:
   `cityId:null`/`regionId:null` being accepted as legal, the real pricing
   shape being accepted and the old placeholder pricing shape being
   rejected, the concurrency limiter's in-flight cap/ordering/edge cases,
-  and the token-usage accumulator's summing/reset/no-op-on-missing-usage
-  behavior — all passing.
+  the token-usage accumulator's summing/reset/no-op-on-missing-usage
+  behavior, the brief-parser's heuristic keyword mapping in Uzbek/Russian/
+  English to real enum values (schools, lyceums, language centers, course
+  centers, tutoring, IELTS, university prep, kids education, etc.), an
+  unscoped/unmatched brief resolving to `"all"`/`"all"`, a brief-less run
+  matching the exact pre-brief-feature default categories, and `--mock`
+  discovery visibly filtering the 40 fixtures by the resolved
+  `DiscoveryScope` (e.g. `"maktablar"` narrows to just the SCHOOL-tagged
+  fixtures) — all passing.
+- `npx tsx src/cli.ts run --count 40 --mock` (no `--brief`): confirmed
+  identical outcome to before this feature (39 unique candidates after
+  dedupe, `resolvedScope.source === "default"`, same 4 categories).
+- `npx tsx src/cli.ts run --count 40 --mock --brief "maktablar"`: confirmed
+  the run narrows to only the 3 SCHOOL-tagged fixtures (materially
+  different from the no-brief run) and `report.json`'s `resolvedScope`
+  records `types: ["SCHOOL"]`, `source: "heuristic"`.
+- `npx tsx src/cli.ts run --count 40 --mock --brief "top oquv markazlari haqida ma'lumot tayyorla"`
+  (a broad/unspecific brief with no clear keyword match): confirmed it
+  resolves to `types: "all"`, `categories: "all"` and behaves exactly like
+  the broadest possible no-brief-equivalent run (all 40 fixtures, same
+  outcome counts) — matching the intent that an unscoped ask should cover
+  every institution type.
 - `npm run build` (`tsc`): clean, no errors.

@@ -23,6 +23,8 @@ import { validateRecord } from "../src/services/validator.js";
 import { BilimOnExportRecordZ } from "../src/schemas/bilimon-export.zod.js";
 import { runWithConcurrency } from "../src/services/concurrency.js";
 import { getTokenUsage, resetTokenUsage, recordUsage } from "../src/services/llm-client.js";
+import { resolveBriefHeuristic, loadDefaultScope, resolveBrief } from "../src/services/brief-parser.js";
+import { discoverMock } from "../src/agents/discovery.js";
 import type { BilimOnExportRecord } from "../src/types/index.js";
 
 const REAL_TASHKENT_CITY_ID = "cmrfw8t3y000fn3og703hdh1a";
@@ -287,6 +289,92 @@ console.log("7. llm-client token usage accumulator sums input/output tokens acro
     "recordUsage(null/undefined) is a safe no-op"
   );
   resetTokenUsage(); // leave global state clean for anything that runs after this test file
+}
+
+console.log("8. brief-parser: heuristic keyword mapping (Uzbek/Russian/English) to real enum values");
+{
+  const uzSchool = resolveBriefHeuristic("O'zbekistondagi barcha maktablar");
+  assert(
+    uzSchool.types !== "all" && (uzSchool.types as string[]).includes("SCHOOL"),
+    `"maktablar" (Uzbek: schools) maps to type SCHOOL (got ${JSON.stringify(uzSchool.types)})`
+  );
+
+  const enLyceum = resolveBriefHeuristic("looking for lyceums in Uzbekistan");
+  assert(
+    enLyceum.types !== "all" && (enLyceum.types as string[]).includes("LYCEUM"),
+    `"lyceums" (English) maps to type LYCEUM (got ${JSON.stringify(enLyceum.types)})`
+  );
+
+  const ruLanguageCenter = resolveBriefHeuristic("топ языковой центр в Ташкенте");
+  assert(
+    ruLanguageCenter.types !== "all" && (ruLanguageCenter.types as string[]).includes("LANGUAGE_CENTER"),
+    `"языковой центр" (Russian: language center) maps to type LANGUAGE_CENTER (got ${JSON.stringify(ruLanguageCenter.types)})`
+  );
+
+  const uzIelts = resolveBriefHeuristic("top IELTS markazlari");
+  assert(
+    uzIelts.categories !== "all" && (uzIelts.categories as string[]).includes("IELTS"),
+    `"IELTS markazlari" maps to category IELTS (got ${JSON.stringify(uzIelts.categories)})`
+  );
+  assert(uzIelts.types === "all", `"top IELTS markazlari" names no institution type, so types stays "all" (got ${JSON.stringify(uzIelts.types)})`);
+
+  const uzUniPrep = resolveBriefHeuristic("universitetga tayyorlov kurslari");
+  assert(
+    uzUniPrep.categories !== "all" && (uzUniPrep.categories as string[]).includes("UNIVERSITY_PREP"),
+    `"universitetga tayyorlov" maps to category UNIVERSITY_PREP (got ${JSON.stringify(uzUniPrep.categories)})`
+  );
+  assert(
+    uzUniPrep.types !== "all" && (uzUniPrep.types as string[]).includes("COURSE_CENTER"),
+    `"kurslari" (courses) also maps to type COURSE_CENTER (got ${JSON.stringify(uzUniPrep.types)})`
+  );
+
+  const enKids = resolveBriefHeuristic("kids development centers");
+  assert(
+    enKids.categories !== "all" && (enKids.categories as string[]).includes("KIDS_EDUCATION"),
+    `"kids development" maps to category KIDS_EDUCATION (got ${JSON.stringify(enKids.categories)})`
+  );
+
+  const tutoring = resolveBriefHeuristic("repetitorlar kerak");
+  assert(
+    tutoring.types !== "all" && (tutoring.types as string[]).includes("TUTORING"),
+    `"repetitor" (Uzbek: tutor) maps to type TUTORING (got ${JSON.stringify(tutoring.types)})`
+  );
+
+  // Broad/unspecific brief -> no keyword hit on either dimension -> "all"/"all"
+  // (the broadest possible scope), matching the "prepare data about ALL
+  // institutions" intent for an unscoped ask.
+  const broad = resolveBriefHeuristic("top o'quv markazlari haqida ma'lumot tayyorla");
+  assert(broad.types === "all", `an unscoped/unmatched brief resolves types to "all" (got ${JSON.stringify(broad.types)})`);
+  assert(broad.categories === "all", `an unscoped/unmatched brief resolves categories to "all" (got ${JSON.stringify(broad.categories)})`);
+
+  // Empty brief -> the pre-existing config/priority-categories.json default,
+  // unchanged from before this feature existed.
+  const empty = await resolveBrief(undefined);
+  const defaultScope = loadDefaultScope();
+  assert(empty.source === "default", `resolveBrief(undefined) uses the config-file default (got source=${empty.source})`);
+  assert(
+    JSON.stringify(empty.categories) === JSON.stringify(defaultScope.categories),
+    "a brief-less run resolves to the exact same categories as config/priority-categories.json (unchanged pre-brief-feature behavior)"
+  );
+  assert(empty.types === "all", "a brief-less run leaves types unrestricted (\"all\"), matching pre-brief-feature behavior (type was never filtered before)");
+}
+
+console.log("9. --mock discovery filters/prioritizes fixtures by the resolved DiscoveryScope");
+{
+  const all40 = discoverMock(40, loadDefaultScope());
+  assert(all40.length === 40, `the default (brief-less) scope still returns all 40 fixtures (got ${all40.length})`);
+
+  const schoolsScope = resolveBriefHeuristic("maktablar");
+  const schoolsOnly = discoverMock(40, schoolsScope);
+  assert(schoolsOnly.length > 0 && schoolsOnly.length < 40, `a "maktablar" brief visibly narrows the fixture set (got ${schoolsOnly.length}/40)`);
+  assert(
+    schoolsOnly.every((c) => c.type === "SCHOOL" || c.type === "LYCEUM"),
+    "every fixture returned for a schools-scoped brief is tagged SCHOOL or LYCEUM"
+  );
+
+  const broadScope = resolveBriefHeuristic("top o'quv markazlari haqida ma'lumot tayyorla");
+  const broadResult = discoverMock(40, broadScope);
+  assert(broadResult.length === 40, `an unscoped/broad brief resolves to "all" and returns all 40 fixtures (got ${broadResult.length})`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

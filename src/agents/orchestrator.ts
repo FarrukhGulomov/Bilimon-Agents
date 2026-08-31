@@ -19,6 +19,8 @@ import { validateRecord } from "../services/validator.js";
 import { generateId, normalizeNameKey, slugify } from "../services/normalizer.js";
 import { runWithConcurrency } from "../services/concurrency.js";
 import { loadExecutionConfig } from "../services/execution-config.js";
+import { resolveBrief, type DiscoveryScope } from "../services/brief-parser.js";
+import { persistLastScope } from "../services/scope-store.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATE_DIR = join(__dirname, "..", "..", "data", "state");
@@ -103,6 +105,13 @@ export interface ProgressSnapshot {
 export interface RunOptions {
   count: number;
   mock: boolean;
+  /** Free-text brief (Uzbek/Russian/English) describing what kind of
+   * institutions to discover, e.g. "top IELTS markazlari" or "barcha
+   * maktablar". Resolved to a DiscoveryScope via
+   * services/brief-parser.ts::resolveBrief. Omit (or pass undefined/empty)
+   * for the pre-existing config/priority-categories.json default scope —
+   * unchanged behavior for brief-less callers. */
+  brief?: string;
   /** Called after each institution finishes the RESEARCHING..gate pipeline
    * (and every time an already-terminal one is skipped), so a caller (the
    * CLI) can print a running progress line during a long batch. Optional —
@@ -116,6 +125,7 @@ export interface RunSummary {
   approved: number;
   needsReview: number;
   rejected: number;
+  resolvedScope: DiscoveryScope;
 }
 
 type CandidateOutcome = "approved" | "needsReview" | "rejected" | "retry-pending";
@@ -146,7 +156,9 @@ function dedupeCandidates(candidates: DiscoveryCandidate[]): {
 
 export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
   ensureDirs();
-  const candidates = await runDiscovery(opts.count, opts.mock);
+  const scope = await resolveBrief(opts.brief);
+  persistLastScope(scope);
+  const candidates = await runDiscovery(opts.count, opts.mock, scope);
   const { survivors, mergedAwayIds } = dedupeCandidates(candidates);
 
   // Record duplicates in state so report.json can count them, without
@@ -198,9 +210,15 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
       const { fields, evidenceCount, bestSourceConfidence } = mergeEvidence(researchRecord);
       // Fill in city/category from discovery if research didn't supply them.
       if (!fields.city && cand.city) fields.city = cand.city;
-      if (!fields.categories || fields.categories.length === 0) {
+      if ((!fields.categories || fields.categories.length === 0) && cand.category) {
         // category comes from discovery as a plain string matching the enum name.
         fields.categories = [cand.category as any];
+      }
+      if (!fields.type && cand.type) {
+        // type comes from discovery (mock fixtures, or the resolved
+        // DiscoveryScope facet in live mode) as a plain string matching the
+        // real InstitutionType enum name.
+        fields.type = cand.type as any;
       }
       if (!fields.phone && cand.phone) fields.phone = cand.phone;
       if (!fields.website && cand.website) fields.website = cand.website;
@@ -317,6 +335,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
     approved,
     needsReview,
     rejected: rejectedCount,
+    resolvedScope: scope,
   };
 }
 
