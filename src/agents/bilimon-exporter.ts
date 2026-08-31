@@ -16,7 +16,7 @@ import type {
 } from "../types/index.js";
 import type { ContentResult } from "./content-manager.js";
 import { resolveCity } from "../services/location-mapper.js";
-import { normalizePhone } from "../services/normalizer.js";
+import { normalizePhone, normalizeUrl } from "../services/normalizer.js";
 import { getTokenUsage } from "../services/llm-client.js";
 import { readLastScope } from "../services/scope-store.js";
 
@@ -103,7 +103,12 @@ export function buildExportRecord(
     // it validates, otherwise passed through raw rather than dropped.
     phone2: isMultiNumberPhone2 ? rawPhone2 : normalizedPhone2?.valid ? normalizedPhone2.normalized! : rawPhone2,
     email: fields.email ?? null,
-    website: fields.website ?? null,
+    // Real production bug: a bare domain like "mathuz.uz" (no scheme) from
+    // a search result/extraction passed straight through here and then
+    // failed the export schema's strict `https?://` URL check downstream,
+    // even though normalizeUrl() (already used elsewhere for dedupe) exists
+    // specifically to add the missing scheme. Now actually used.
+    website: normalizeUrl(fields.website),
     telegram: fields.telegram ?? null,
     instagram: fields.instagram ?? null,
     cityId: cityRes!.cityId,
