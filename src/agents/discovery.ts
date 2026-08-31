@@ -3,7 +3,7 @@
  * data/fixtures/mock-discovery.json (clearly labeled FIXTURE/TEST DATA —
  * never real institutions). In real mode, runs live web search per
  * priority category / seed city via services/search.ts (requires
- * ANTHROPIC_API_KEY; not exercised in this build environment).
+ * OPENAI_API_KEY; not exercised in this build environment).
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -68,7 +68,7 @@ export function discoverMock(count: number): DiscoveryCandidate[] {
 /**
  * Real discovery: iterates priority categories x seed cities running live
  * web search until `count` candidates are collected. Requires
- * ANTHROPIC_API_KEY (see services/llm-client.ts MissingApiKeyError).
+ * OPENAI_API_KEY (see services/llm-client.ts MissingApiKeyError).
  */
 export async function discoverLive(count: number): Promise<DiscoveryCandidate[]> {
   const categories = loadPriorityCategories();

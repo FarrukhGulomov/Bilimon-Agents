@@ -44,7 +44,7 @@ function isMock(flags: Record<string, string | boolean>): boolean {
 async function cmdRun(flags: Record<string, string | boolean>) {
   const count = Number(flags.count ?? 5);
   const mock = isMock(flags);
-  if (!mock && !process.env.ANTHROPIC_API_KEY) {
+  if (!mock && !process.env.OPENAI_API_KEY) {
     console.error(new MissingApiKeyError().message);
     process.exitCode = 1;
     return;

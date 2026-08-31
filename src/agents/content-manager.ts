@@ -7,7 +7,7 @@
  * when there isn't enough real source material.
  *
  * In --mock mode this uses a plain-code template (no LLM call) so the
- * pipeline is fully exercisable offline; in real mode it calls Claude via
+ * pipeline is fully exercisable offline; in real mode it calls OpenAI via
  * services/llm-client.ts with the constraints above baked into the prompt.
  */
 import type { RawExtractedFields } from "../types/index.js";
@@ -52,7 +52,7 @@ function buildMockContent(fields: RawExtractedFields): ContentResult {
   };
 }
 
-/** Real content generation via Claude. Not exercised in this build environment. */
+/** Real content generation via OpenAI. Not exercised in this build environment. */
 async function buildLiveContent(fields: RawExtractedFields): Promise<ContentResult> {
   const source = fields.descriptionSourceText?.trim();
   if (!source || source.length < MIN_SOURCE_TEXT_LENGTH) {

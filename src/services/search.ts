@@ -1,6 +1,7 @@
 /**
- * Wraps Anthropic's server-side web_search tool for the Discovery agent's
- * live discovery of learning institutions. Never called in --mock mode.
+ * Wraps OpenAI's hosted `web_search` Responses API tool for the Discovery
+ * agent's live discovery of learning institutions. Never called in --mock
+ * mode.
  */
 import { webSearchAndSummarize, type WebSearchResultItem } from "./llm-client.js";
 

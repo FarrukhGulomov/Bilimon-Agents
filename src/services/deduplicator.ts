@@ -107,7 +107,7 @@ export function deterministicDedupe(candidates: DedupeCandidate[]): DedupeGroup[
 /**
  * AI-assisted fallback for two candidates the deterministic rules could not
  * confidently merge or split (e.g. similar-but-not-identical names, no
- * shared phone/domain). Requires ANTHROPIC_API_KEY; never called in mock
+ * shared phone/domain). Requires OPENAI_API_KEY; never called in mock
  * mode. Returns true if the LLM judges them the same real-world institution.
  */
 export async function isAmbiguousDuplicate(a: DedupeCandidate, b: DedupeCandidate): Promise<boolean> {

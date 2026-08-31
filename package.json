@@ -16,7 +16,7 @@
     "test": "tsx test/run-all.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.32.1",
+    "openai": "^7.8.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
