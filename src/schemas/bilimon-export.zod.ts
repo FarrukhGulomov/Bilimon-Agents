@@ -1,7 +1,8 @@
 /**
- * PLACEHOLDER zod schema for the BilimOn export record. Mirrors
- * bilimon-reference.example.json / src/types/index.ts BilimOnExportRecord.
- * NOT the authoritative BilimOn schema — see that file's header comment.
+ * REAL zod schema for the BilimOn export record, mirroring the actual
+ * production export at data/reference/bilimon-institutions-reference.json
+ * (302 real institutions) and src/types/index.ts BilimOnExportRecord. See
+ * README.md "Schema status: REAL" for how each field/enum was verified.
  */
 import { z } from "zod";
 import {
@@ -9,40 +10,42 @@ import {
   DELIVERY_MODES,
   INSTITUTION_STATUSES,
   INSTITUTION_TYPES,
-  LANGUAGES,
-  MEDIA_TYPES,
 } from "./enums.js";
 
-const phoneRegex = /^\+998\d{9}$/;
+// Our own pipeline normalizes any phone it fills in to this shape (see
+// services/normalizer.ts::normalizePhone), but the real export shows this
+// is NOT a schema-level guarantee: 259/302 real records have phone:null and
+// 10 more have raw messy formats ("+998 (90) 900-79-66"). The zod schema
+// below is therefore permissive on `phone`/`phone2` shape (nullable free-form
+// string) — src/services/validator.ts soft-flags an unnormalized phone for
+// review rather than the zod layer hard-rejecting real-shaped data.
+export const phoneRegex = /^\+998\d{9}$/;
 const urlRegex = /^https?:\/\/.+/i;
+// details.languages: lowercase 2-3 letter code. Real observed set is
+// uz/ru/en/de but this is treated as extensible, not closed — see enums.ts.
+const languageCodeRegex = /^[a-z]{2,3}$/;
 
 export const InstitutionTypeZ = z.enum(INSTITUTION_TYPES);
 export const InstitutionStatusZ = z.enum(INSTITUTION_STATUSES);
 export const DeliveryModeZ = z.enum(DELIVERY_MODES);
 export const CategoryZ = z.enum(CATEGORIES);
-export const LanguageCodeZ = z.enum(LANGUAGES);
-export const MediaTypeZ = z.enum(MEDIA_TYPES);
+export const LanguageCodeZ = z.string().regex(languageCodeRegex, "language code must be a lowercase 2-3 letter code");
 
-export const MediaItemZ = z.object({
-  type: MediaTypeZ,
-  url: z.string().regex(urlRegex, "media.url must be an http(s) URL"),
-});
+// media/branches are always [] in the real export; per-element shape is
+// genuinely unconfirmed, so we accept anything rather than asserting a
+// guessed structure (see src/types/index.ts MediaItem/BranchRecord).
+export const MediaItemZ = z.unknown();
+export const BranchZ = z.unknown();
 
+// Real shape, observed in 34/302 records: {monthlyMin, monthlyMax, paymentMethods}.
+// Replaces the old placeholder's guessed {min, max, currency, notes} shape.
 export const PricingZ = z
   .object({
-    min: z.number().nullable(),
-    max: z.number().nullable(),
-    currency: z.literal("UZS"),
-    notes: z.string().nullable(),
+    monthlyMin: z.number(),
+    monthlyMax: z.number(),
+    paymentMethods: z.array(z.string()),
   })
   .nullable();
-
-export const BranchZ = z.object({
-  id: z.string().min(1),
-  address: z.string().nullable(),
-  cityId: z.number().int().nullable(),
-  phone: z.string().nullable(),
-});
 
 export const DetailsZ = z.object({
   descriptionUz: z.string().nullable(),
@@ -59,7 +62,9 @@ export const DetailsZ = z.object({
 });
 
 export const BilimOnExportRecordZ = z.object({
-  id: z.string().min(1),
+  // See src/types/index.ts BilimOnExportRecord.id doc comment — nullable
+  // pending confirmation of BilimOn's real import id convention.
+  id: z.string().min(1).nullable(),
   nameUz: z.string().min(1),
   nameRu: z.string().min(1),
   nameKey: z.string().min(1),
@@ -67,14 +72,17 @@ export const BilimOnExportRecordZ = z.object({
   type: InstitutionTypeZ,
   additionalTypes: z.array(InstitutionTypeZ),
   status: InstitutionStatusZ,
-  phone: z.string().regex(phoneRegex, "phone must match +998XXXXXXXXX"),
-  phone2: z.string().regex(phoneRegex).nullable(),
+  phone: z.string().nullable(), // real data: null in 259/302 records, one empty string, or a raw messy format
+  phone2: z.string().nullable(), // real data: sometimes multiple comma-separated numbers in one string
   email: z.string().email().nullable(),
   website: z.string().regex(urlRegex).nullable(),
-  telegram: z.string().nullable(),
-  instagram: z.string().nullable(),
-  cityId: z.number().int().positive(),
-  regionId: z.number().int().positive(),
+  telegram: z.string().nullable(), // real data: bare handle or full URL, both legal
+  instagram: z.string().nullable(), // real data: bare handle or full URL, both legal
+  // Both nullable: the real export has cityId:null+regionId:set (11 records,
+  // region known/city unspecified) and cityId:null+regionId:null (3 records,
+  // fully unknown location) — both are legal per the real schema.
+  cityId: z.string().min(1).nullable(),
+  regionId: z.string().min(1).nullable(),
   address: z.string().nullable(),
   lat: z.number().nullable(),
   lng: z.number().nullable(),

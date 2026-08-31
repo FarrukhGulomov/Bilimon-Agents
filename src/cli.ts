@@ -2,7 +2,7 @@
 /**
  * CLI entrypoint.
  *
- *   pipeline run --count 5|20|500 [--mock]
+ *   pipeline run --count N [--mock]   (N is an arbitrary batch size, e.g. 5, 20, 200, ...)
  *   pipeline validate
  *   pipeline export
  */

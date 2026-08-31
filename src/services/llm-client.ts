@@ -50,8 +50,8 @@ export class MissingApiKeyError extends Error {
 // output_tokens per call when the API returns usage info. This is a plain
 // in-process running total for the current `pipeline run` invocation —
 // not persisted, and reset per process. Included in the final report.json
-// as `estimatedTokenUsage` so a human watching a large (e.g. 500-
-// institution) real run has a rough sense of LLM volume. Deliberately
+// as `estimatedTokenUsage` so a human watching a large real batch run
+// (batches can be any size) has a rough sense of LLM volume. Deliberately
 // token counts only, no dollar figure: pricing is not verified in this
 // codebase and would go stale immediately — compute cost yourself against
 // https://platform.openai.com/docs/pricing for whatever OPENAI_MODEL is in

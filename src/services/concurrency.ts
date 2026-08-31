@@ -2,9 +2,9 @@
  * Lightweight concurrency limiter for batch async work over an array of
  * items — plain async logic, no new dependency. Used by the orchestrator
  * to cap how many institutions are in-flight at once through the
- * LLM-heavy Researcher/Content-Manager stages during a large (e.g.
- * 500-institution) run, so `pipeline run` never fires more than
- * `limit` simultaneous LLM calls.
+ * LLM-heavy Researcher/Content-Manager stages during a large batch run
+ * (batches can be any size, with no fixed ceiling), so `pipeline run`
+ * never fires more than `limit` simultaneous LLM calls.
  *
  * Implementation is a simple pull-based worker pool ("semaphore via N
  * workers pulling from a shared cursor"): spin up at most `limit` workers,

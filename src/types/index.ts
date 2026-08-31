@@ -1,8 +1,10 @@
 /**
- * Internal pipeline types. The `BilimOnExportRecord` shape mirrors the
- * PLACEHOLDER schema in src/schemas/bilimon-reference.example.json — see
- * that file's header comment and README.md for the caveat that this is
- * not the authoritative BilimOn schema.
+ * Internal pipeline types. The `BilimOnExportRecord` shape mirrors the REAL
+ * BilimOn production export at
+ * data/reference/bilimon-institutions-reference.json (302 institutions) —
+ * see README.md "Schema status: REAL" for the verification method and the
+ * one still-open question (the `id` field convention, noted on that field
+ * below).
  */
 import type {
   Category,
@@ -10,7 +12,6 @@ import type {
   InstitutionStatus,
   InstitutionType,
   LanguageCode,
-  MediaType,
 } from "../schemas/enums.js";
 
 export type PipelineState =
@@ -24,7 +25,10 @@ export type PipelineState =
   | "REJECTED";
 
 export interface StateRecord {
-  id: string; // deterministic slug-based id
+  /** Deterministic, pipeline-internal id (see services/normalizer.ts::generateId) —
+   * deliberately NOT a BilimOn cuid and NOT the value written to
+   * BilimOnExportRecord.id. Used only to key data/state|processed|review/<id>.json. */
+  id: string;
   state: PipelineState;
   createdAt: string;
   updatedAt: string;
@@ -112,16 +116,18 @@ export interface ScoreResult {
   status: "APPROVED" | "APPROVED_WITH_WARNINGS" | "NEEDS_REVIEW" | "REJECTED";
 }
 
-export interface MediaItem {
-  type: MediaType;
-  url: string;
-}
+/**
+ * `media` is always `[]` in all 302 real reference records — its real
+ * per-element schema is genuinely unconfirmed. Kept as `unknown` rather
+ * than carrying forward the old placeholder's invented {type, url} shape.
+ */
+export type MediaItem = unknown;
 
+/** Real pricing shape, observed in 34/302 records (268/302 have pricing: null). */
 export interface PricingInfo {
-  min: number | null;
-  max: number | null;
-  currency: "UZS";
-  notes: string | null;
+  monthlyMin: number;
+  monthlyMax: number;
+  paymentMethods: string[];
 }
 
 export interface InstitutionDetails {
@@ -138,16 +144,28 @@ export interface InstitutionDetails {
   categories: Category[];
 }
 
-export interface BranchRecord {
-  id: string;
-  address: string | null;
-  cityId: number | null;
-  phone: string | null;
-}
+/**
+ * `branches` is always `[]` in all 302 real reference records — its real
+ * per-element schema is genuinely unconfirmed. Kept as `unknown` rather
+ * than carrying forward the old placeholder's invented shape.
+ */
+export type BranchRecord = unknown;
 
-/** The placeholder BilimOn export record shape. See schema caveat above. */
+/** The REAL BilimOn export record shape (see README.md "Schema status: REAL"). */
 export interface BilimOnExportRecord {
-  id: string;
+  /**
+   * OPEN QUESTION for the user to confirm against BilimOn's real
+   * backend/import mechanism: the 302 real records all carry cuid-style ids
+   * (e.g. "cmrfw8t5o001an3ogocewc8g6") that look auto-assigned on insert,
+   * not client-supplied. We cannot inspect BilimOn's real import code from
+   * this data export alone, so this pipeline defaults to NOT fabricating a
+   * fake-looking cuid: exported records leave `id` null and let BilimOn's
+   * own import assign the real id. If BilimOn's import instead requires a
+   * client-supplied cuid, generate one here and update this comment.
+   * Pipeline-internal state tracking uses a separate, clearly-prefixed id
+   * (see StateRecord.id / services/normalizer.ts::generateId) — never this field.
+   */
+  id: string | null;
   nameUz: string;
   nameRu: string;
   nameKey: string;
@@ -155,14 +173,19 @@ export interface BilimOnExportRecord {
   type: InstitutionType;
   additionalTypes: InstitutionType[];
   status: InstitutionStatus;
-  phone: string;
+  /** Nullable in the real data: 259/302 real records have phone:null, and 10
+   * more have raw messy formats ("+998 (90) 900-79-66") rather than
+   * normalized +998XXXXXXXXX — see README.md field-quirks notes. */
+  phone: string | null;
   phone2: string | null;
   email: string | null;
   website: string | null;
   telegram: string | null;
   instagram: string | null;
-  cityId: number;
-  regionId: number;
+  /** null only for the "region known, city unspecified" real case — see schemas/locations.ts. */
+  cityId: string | null;
+  /** null for the "fully unknown location" real case (3/302 records) — see schemas/locations.ts. */
+  regionId: string | null;
   address: string | null;
   lat: number | null;
   lng: number | null;

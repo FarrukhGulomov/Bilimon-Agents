@@ -1,10 +1,16 @@
 /**
  * Minimal plain-node/tsx test runner (no test framework). Asserts:
- *  - slug generation is deterministic
+ *  - slug generation is deterministic, and matches the real BilimOn export's
+ *    own slug convention for two real examples (King's Academy, Najot Ta'lim)
  *  - phone normalization rejects malformed numbers
  *  - dedupe collapses the known Cambridge duplicate pair
  *  - validator rejects an unknown enum value
- *  - location-mapper resolves Tashkent/Toshkent/Ташкент to the same cityId
+ *  - validator accepts the real (cityId:null, regionId:null) location case
+ *  - validator accepts the real pricing shape and rejects the old
+ *    placeholder pricing shape
+ *  - location-mapper resolves Tashkent/Toshkent/Ташкент to the same real cityId
+ *  - location-mapper does NOT invent an id for a city outside the real
+ *    reference export's 8-region coverage (e.g. Nukus/Qoraqalpog'iston)
  *  - runWithConcurrency caps in-flight work at `limit` and preserves order
  *  - llm-client's token usage accumulator sums input/output tokens per call
  *
@@ -14,9 +20,13 @@ import { slugify, normalizePhone, generateId, normalizeNameKey } from "../src/se
 import { resolveCity } from "../src/services/location-mapper.js";
 import { deterministicDedupe } from "../src/services/deduplicator.js";
 import { validateRecord } from "../src/services/validator.js";
+import { BilimOnExportRecordZ } from "../src/schemas/bilimon-export.zod.js";
 import { runWithConcurrency } from "../src/services/concurrency.js";
 import { getTokenUsage, resetTokenUsage, recordUsage } from "../src/services/llm-client.js";
 import type { BilimOnExportRecord } from "../src/types/index.js";
+
+const REAL_TASHKENT_CITY_ID = "cmrfw8t3y000fn3og703hdh1a";
+const REAL_TASHKENT_REGION_ID = "cmrfw8t2z0000n3ogoka95589";
 
 let pass = 0;
 let fail = 0;
@@ -40,6 +50,17 @@ console.log("1. Slug generation is deterministic");
   const id1 = generateId(normalizeNameKey("Cambridge Learning Center"), "Tashkent");
   const id2 = generateId(normalizeNameKey("Cambridge Learning Center"), "Tashkent");
   assert(id1 === id2, "generateId() is deterministic given the same name+city");
+  assert(
+    id1.startsWith("pipeline-") && !/^c[a-z0-9]{24}$/.test(id1),
+    "generateId() uses a clearly-prefixed pipeline-internal scheme, never a cuid-lookalike"
+  );
+
+  // Two real examples from data/reference/bilimon-institutions-reference.json:
+  // confirm our slug generator matches BilimOn's own real slug convention.
+  const kingsSlug = slugify("King's Academy");
+  assert(kingsSlug === "kings-academy", `"King's Academy" slugifies to the real convention (got "${kingsSlug}")`);
+  const najotSlug = slugify("Najot Ta'lim");
+  assert(najotSlug === "najot-talim", `"Najot Ta'lim" slugifies to the real convention (got "${najotSlug}")`);
 }
 
 console.log("2. Phone normalization rejects malformed numbers");
@@ -114,8 +135,8 @@ console.log("4. Validator rejects an unknown enum value");
     website: null,
     telegram: null,
     instagram: null,
-    cityId: 1,
-    regionId: 1,
+    cityId: REAL_TASHKENT_CITY_ID,
+    regionId: REAL_TASHKENT_REGION_ID,
     address: "Test address",
     lat: null,
     lng: null,
@@ -128,7 +149,7 @@ console.log("4. Validator rejects an unknown enum value");
       foundedYear: null,
       studentCount: null,
       teacherCount: null,
-      languages: ["UZ"],
+      languages: ["uz"],
       programs: [],
       shifts: [],
       specializations: [],
@@ -150,9 +171,34 @@ console.log("4. Validator rejects an unknown enum value");
     "rejection reasons mention the offending `type` field"
   );
 
-  const badCity = { ...base, cityId: 99999 };
+  const badCity = { ...base, cityId: "not-a-real-cuid" };
   const badCityResult = validateRecord(badCity);
   assert(!badCityResult.valid, "a record with an unknown cityId is rejected");
+
+  // Real schema case: cityId:null AND regionId:null is legal (3/302 real
+  // records — "fully unknown location"), not a validation failure.
+  const fullyUnknownLocation = { ...base, cityId: null, regionId: null };
+  const fullyUnknownResult = validateRecord(fullyUnknownLocation);
+  assert(
+    fullyUnknownResult.valid,
+    `cityId:null + regionId:null is accepted as legal per the real schema (reasons: ${fullyUnknownResult.reasons.join(", ")})`
+  );
+
+  // Real pricing shape (monthlyMin/monthlyMax/paymentMethods) is accepted...
+  const realPricing = {
+    ...base,
+    pricing: { monthlyMin: 500000, monthlyMax: 1200000, paymentMethods: ["Payme", "Click"] },
+  };
+  const realPricingParsed = BilimOnExportRecordZ.safeParse(realPricing);
+  assert(realPricingParsed.success, "the real pricing shape {monthlyMin, monthlyMax, paymentMethods} parses successfully");
+
+  // ...while the OLD placeholder pricing shape ({min,max,currency,notes}) is rejected.
+  const placeholderPricing = {
+    ...base,
+    pricing: { min: 500000, max: 1200000, currency: "UZS", notes: null },
+  };
+  const placeholderPricingParsed = BilimOnExportRecordZ.safeParse(placeholderPricing);
+  assert(!placeholderPricingParsed.success, "the old placeholder pricing shape {min,max,currency,notes} is rejected");
 }
 
 console.log("5. Location-mapper resolves Tashkent/Toshkent/Ташкент to the same cityId");
@@ -167,6 +213,15 @@ console.log("5. Location-mapper resolves Tashkent/Toshkent/Ташкент to the
   );
   const unknown = resolveCity("Nonexistentburg");
   assert(unknown === null, "an unrecognized city name resolves to null rather than guessing");
+
+  // Real coverage gap: the 302-record reference export has zero institutions
+  // in Nukus/Qoraqalpog'iston (and Navoiy, Termez, Guliston, Urganch) — these
+  // must NOT resolve to a fabricated id; the exporter routes them to
+  // NEEDS_REVIEW instead (see agents/bilimon-exporter.ts).
+  const nukus = resolveCity("Nukus");
+  assert(nukus === null, "Nukus/Qoraqalpog'iston (not in the real reference export) resolves to null, not a fabricated id");
+  const termez = resolveCity("Termez");
+  assert(termez === null, "Termez/Surxondaryo (not in the real reference export) resolves to null, not a fabricated id");
 }
 
 console.log("6. runWithConcurrency caps in-flight work and preserves per-item results");

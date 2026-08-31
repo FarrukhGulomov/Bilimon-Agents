@@ -1,7 +1,9 @@
 /**
  * Loads config/execution.json — the scale/concurrency settings used when
- * running the orchestrator at large batch sizes (up to the ~500-institution
- * target). See that file's `_comment` for what each field does.
+ * running the orchestrator at large batch sizes, as the pipeline scales up
+ * toward covering all learning institutions nationwide over successive
+ * batches (no fixed target count). See that file's `_comment` for what each
+ * field does.
  *
  * `maxConcurrency` can be overridden per-run via the PIPELINE_MAX_CONCURRENCY
  * env var (e.g. `PIPELINE_MAX_CONCURRENCY=10 npx tsx src/cli.ts run ...`)
