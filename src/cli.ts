@@ -81,13 +81,28 @@ async function cmdRun(flags: Record<string, string | boolean>) {
   console.log(`Wrote ${importPath}`);
   console.log(`Wrote ${reportPath}`);
   console.log(JSON.stringify(report, null, 2));
+  maybePrintImportFile(flags, importPath);
 }
 
-function cmdExport() {
+function cmdExport(flags: Record<string, string | boolean>) {
   const { importPath, reportPath, report } = finalizeExport();
   console.log(`Wrote ${importPath}`);
   console.log(`Wrote ${reportPath}`);
   console.log(JSON.stringify(report, null, 2));
+  maybePrintImportFile(flags, importPath);
+}
+
+// On platforms with no persistent/attached storage (e.g. a bare Railway
+// service container, which is destroyed on redeploy), there is no way to
+// download data/export/bilimon-import.json after the run. Passing
+// --print-import (or PIPELINE_PRINT_IMPORT=1) dumps its full contents to
+// stdout so it's visible in the platform's deploy/run logs instead.
+function maybePrintImportFile(flags: Record<string, string | boolean>, importPath: string) {
+  const shouldPrint = Boolean(flags["print-import"]) || process.env.PIPELINE_PRINT_IMPORT === "1";
+  if (!shouldPrint) return;
+  console.log("----- BEGIN bilimon-import.json -----");
+  console.log(readFileSync(importPath, "utf-8"));
+  console.log("----- END bilimon-import.json -----");
 }
 
 function cmdValidate() {
@@ -128,10 +143,12 @@ async function main() {
         cmdValidate();
         break;
       case "export":
-        cmdExport();
+        cmdExport(flags);
         break;
       default:
-        console.log('Usage: pipeline <run|validate|export> [--count N] [--mock] [--brief "<free text>"]');
+        console.log(
+          'Usage: pipeline <run|validate|export> [--count N] [--mock] [--brief "<free text>"] [--print-import]'
+        );
         process.exitCode = command ? 1 : 0;
     }
   } catch (err) {
