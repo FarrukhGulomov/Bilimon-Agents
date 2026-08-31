@@ -382,6 +382,28 @@ console.log("8. brief-parser: heuristic keyword mapping (Uzbek/Russian/English) 
   assert(empty.types === "all", "a brief-less run leaves types unrestricted (\"all\"), matching pre-brief-feature behavior (type was never filtered before)");
 }
 
+console.log("9a. resolveBriefHeuristic recognizes a named city as a hard regions filter (cost-control feature)");
+{
+  const tashkentOnly = resolveBriefHeuristic("Toshkentda IELTS markazlari");
+  assert(
+    JSON.stringify(tashkentOnly.regions) === JSON.stringify(["Tashkent"]),
+    `a brief naming Tashkent (Uzbek spelling) resolves regions to just Tashkent (got ${JSON.stringify(tashkentOnly.regions)})`
+  );
+  assert(
+    JSON.stringify(tashkentOnly.categories) === JSON.stringify(["IELTS"]),
+    "the same brief still resolves its IELTS category correctly alongside the city filter"
+  );
+
+  const noCityNamed = resolveBriefHeuristic("IELTS markazlari");
+  assert(noCityNamed.regions === "all", 'a brief with no city named leaves regions "all" (searches every seed city)');
+
+  const englishSpelling = resolveBriefHeuristic("schools in Tashkent");
+  assert(
+    JSON.stringify(englishSpelling.regions) === JSON.stringify(["Tashkent"]),
+    "the English spelling \"Tashkent\" also resolves to the same city"
+  );
+}
+
 console.log("9. --mock discovery filters/prioritizes fixtures by the resolved DiscoveryScope");
 {
   const all40 = discoverMock(40, loadDefaultScope());
