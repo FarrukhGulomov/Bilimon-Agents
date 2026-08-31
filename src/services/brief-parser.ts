@@ -39,6 +39,7 @@ import {
   type InstitutionType,
 } from "../schemas/enums.js";
 import { askStructured } from "./llm-client.js";
+import { listCities } from "./location-mapper.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PRIORITY_PATH = join(__dirname, "..", "..", "config", "priority-categories.json");
@@ -160,15 +161,40 @@ function matchKeywords<T extends string>(
  * fully testable without OPENAI_API_KEY. Any dimension with no keyword hit
  * defaults to "all" (broadest), which is the desired behavior for a vague or
  * unscoped brief like "top o'quv markazlari" (no specific category named). */
+/** Scans the brief for a known city name/alias (Latin, Cyrillic, or common
+ * transliteration variants — reusing the same CITIES table location-mapper
+ * resolves discovered addresses against) and returns the matched cities'
+ * canonical `nameEn` values plus the raw text that matched, for the
+ * DiscoveryScope's `regions`/`keywords` fields. A brief naming a city is
+ * meant as a HARD restriction in discovery.ts (not just a soft hint) —
+ * this exists specifically so e.g. `--brief "Toshkentda"` searches only
+ * Tashkent instead of all 9 seed cities, bounding real API cost/time. */
+function matchCityNames(briefLower: string): { matched: string[]; hits: string[] } {
+  const matched = new Set<string>();
+  const hits = new Set<string>();
+  for (const city of listCities()) {
+    const candidates = [city.nameEn, ...city.aliases];
+    for (const candidate of candidates) {
+      const needle = candidate.toLowerCase();
+      if (needle.length >= 3 && briefLower.includes(needle)) {
+        matched.add(city.nameEn);
+        hits.add(candidate);
+      }
+    }
+  }
+  return { matched: [...matched], hits: [...hits] };
+}
+
 export function resolveBriefHeuristic(brief: string): DiscoveryScope {
   const briefLower = brief.trim().toLowerCase();
   const { matched: types, hits: typeHits } = matchKeywords(briefLower, TYPE_KEYWORDS);
   const { matched: categories, hits: categoryHits } = matchKeywords(briefLower, CATEGORY_KEYWORDS);
+  const { matched: cities, hits: cityHits } = matchCityNames(briefLower);
   return {
     types: types.length > 0 ? [...new Set(types)] : "all",
     categories: categories.length > 0 ? [...new Set(categories)] : "all",
-    regions: "all",
-    keywords: [...new Set([...typeHits, ...categoryHits])],
+    regions: cities.length > 0 ? cities : "all",
+    keywords: [...new Set([...typeHits, ...categoryHits, ...cityHits])],
     briefText: brief,
     source: "heuristic",
   };

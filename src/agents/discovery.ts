@@ -150,9 +150,20 @@ export async function discoverLive(
   scope: DiscoveryScope = loadDefaultScope()
 ): Promise<DiscoveryCandidate[]> {
   const facets = buildSearchFacets(scope);
-  const cities = listCities();
+  // A brief naming a specific city (e.g. "Toshkentda") is a HARD filter
+  // here, not just a hint: it bounds how many (facet, city) live-search
+  // calls run, directly controlling real API cost/time. Falls back to all
+  // seed cities if the named region matched nothing in the known table
+  // (defensive — resolveBriefHeuristic only ever returns names it found in
+  // the same table, so this should not normally trigger).
+  const allCities = listCities();
+  const cities =
+    scope.regions === "all"
+      ? allCities
+      : allCities.filter((c) => (scope.regions as string[]).includes(c.nameEn));
+  const effectiveCities = cities.length > 0 ? cities : allCities;
   const units: SearchUnit[] = [];
-  for (const facet of facets) for (const city of cities) units.push({ facet, city });
+  for (const facet of facets) for (const city of effectiveCities) units.push({ facet, city });
 
   const { maxConcurrency } = loadExecutionConfig();
   const results: DiscoveryCandidate[] = [];
