@@ -248,6 +248,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
           "utf-8"
         );
         state.lastError = built.buildErrors.join("; ");
+        console.log(`NEEDS_REVIEW: ${nameKey} (${id}) — failed to build export record: ${built.buildErrors.join("; ")}`);
         transition(state, "NEEDS_REVIEW", "failed to build export record");
         return "needsReview";
       }
@@ -271,6 +272,10 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
           JSON.stringify({ id, reasons: [`quality score ${score.qualityScore} below REJECTED threshold`], score }, null, 2),
           "utf-8"
         );
+        console.log(
+          `REJECTED: ${nameKey} (${id}) — quality score ${score.qualityScore} ` +
+            `(completeness=${score.dataCompleteness} confidence=${score.sourceConfidence}) below REJECTED threshold`
+        );
         transition(state, "REJECTED", `quality score ${score.qualityScore}`);
         return "rejected";
       }
@@ -278,13 +283,14 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
       const validation = validateRecord(built.record);
       if (score.status === "NEEDS_REVIEW" || !validation.valid) {
         const reasons = score.status === "NEEDS_REVIEW"
-          ? [`quality score ${score.qualityScore} in NEEDS_REVIEW band`, ...validation.reasons]
+          ? [`quality score ${score.qualityScore} in NEEDS_REVIEW band (completeness=${score.dataCompleteness} confidence=${score.sourceConfidence})`, ...validation.reasons]
           : validation.reasons;
         writeFileSync(
           join(REVIEW_DIR, `${id}.json`),
           JSON.stringify({ id, reasons, score }, null, 2),
           "utf-8"
         );
+        console.log(`NEEDS_REVIEW: ${nameKey} (${id}) — ${reasons.join("; ")}`);
         transition(state, "NEEDS_REVIEW", reasons.join("; "));
         return "needsReview";
       }
