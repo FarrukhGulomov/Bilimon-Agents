@@ -32,5 +32,7 @@ export async function searchInstitutions(
       "(language centers, tutoring, schools, exam-prep centers) in Uzbekistan. Only report " +
       "institutions you found genuine evidence for via search — never invent names or URLs."
   );
-  return results.map((r) => ({ ...r, category, type }));
+  // Defense-in-depth: webSearchAndSummarize() already coerces malformed
+  // model output to [], but never trust a boundary twice for free.
+  return (Array.isArray(results) ? results : []).map((r) => ({ ...r, category, type }));
 }
