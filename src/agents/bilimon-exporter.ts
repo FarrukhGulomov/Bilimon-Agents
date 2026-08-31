@@ -15,6 +15,7 @@ import type {
 import type { ContentResult } from "./content-manager.js";
 import { resolveCity } from "../services/location-mapper.js";
 import { normalizePhone } from "../services/normalizer.js";
+import { getTokenUsage } from "../services/llm-client.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXPORT_DIR = join(__dirname, "..", "..", "data", "export");
@@ -171,6 +172,7 @@ export function exportFinalArtifacts(): { importPath: string; reportPath: string
     duplicates,
     averageCompleteness: scoredCount > 0 ? Math.round(completenessSum / scoredCount) : 0,
     averageConfidence: scoredCount > 0 ? Math.round(confidenceSum / scoredCount) : 0,
+    estimatedTokenUsage: getTokenUsage(),
     generatedAt: new Date().toISOString(),
   };
   const reportPath = join(EXPORT_DIR, "report.json");

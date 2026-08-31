@@ -46,12 +46,15 @@ schema has been substituted.**
 ## Fixtures vs. real data
 
 `data/fixtures/mock-discovery.json` and `data/fixtures/mock-research.json`
-contain **synthetic, clearly-fictional** Uzbekistan learning institutions
-(fake names, phone numbers, addresses, websites) used **only** to exercise
-pipeline mechanics end-to-end without live network/API access. They are
-explicitly labeled `_FIXTURE_NOTICE` at the top of each file. **Never**
-treat fixture data as real discovered institutions, and never let it reach
-a real BilimOn import — `--mock` mode output is for pipeline testing only.
+contain **40 synthetic, clearly-fictional** Uzbekistan learning
+institutions (fake names, phone numbers, addresses, websites — including
+one deliberate duplicate pair) used **only** to exercise pipeline
+mechanics end-to-end without live network/API access, at a scale large
+enough to visibly exercise the concurrency limiter and progress reporting
+described below. They are explicitly labeled `_FIXTURE_NOTICE` at the top
+of each file. **Never** treat fixture data as real discovered
+institutions, and never let it reach a real BilimOn import — `--mock`
+mode output is for pipeline testing only.
 
 ## Architecture
 
@@ -61,6 +64,8 @@ Orchestrator (src/agents/orchestrator.ts)
   ├─ Discovery agent        → raw candidates (live web search, or --mock fixtures)
   ├─ Deduplicator service   → deterministic name/phone/domain/social matching
   │                            + AI-assisted fallback for ambiguous cases
+  ├─ Concurrency limiter    → caps how many institutions run the two stages below
+  │  (services/concurrency.ts) at once (config/execution.json maxConcurrency)
   ├─ Researcher agent       → per-institution evidence (scrape+extract, or --mock fixtures)
   ├─ Content Manager agent  → natural Uzbek/Russian descriptions from verified facts only
   ├─ BilimOn Exporter agent → maps merged fields → placeholder BilimOn schema
@@ -75,7 +80,55 @@ APPROVED | NEEDS_REVIEW | REJECTED`. Re-running `pipeline run` is
 idempotent: institutions already in a terminal state (`APPROVED` /
 `NEEDS_REVIEW` / `REJECTED`) are skipped rather than reprocessed, and
 `services/scraper.ts` never refetches a URL already cached under
-`data/cache/<sha256-of-url>.json`.
+`data/cache/<sha256-of-url>.json`. This still holds with the concurrency
+limiter in place — verified by actually running `--mock` batches partway
+(e.g. `--count 20` then `--count 40`) and confirming the first batch's
+outcomes are unchanged and only the newly-added institutions are
+processed on the second run.
+
+### Scaling to ~500 institutions: concurrency, progress, token tracking
+
+These three pieces exist to make a future real 500-institution run
+operationally sane; they do not themselves unblock that run (see the
+"Current status" section below — the real-schema and real-API-access
+blockers are unchanged).
+
+- **Concurrency control.** The Researcher and Content Manager stages are
+  the LLM-call-heavy part of the pipeline, so the orchestrator processes
+  institutions through them with a bounded number in flight at once
+  instead of firing every institution's LLM calls simultaneously. This is
+  a plain async worker-pool (`services/concurrency.ts::runWithConcurrency`)
+  — no new dependency, no real threads, just N async "workers" pulling the
+  next item off a shared cursor. The limit comes from
+  `config/execution.json`'s `maxConcurrency` (default `5`), overridable
+  per-run via `PIPELINE_MAX_CONCURRENCY` (e.g.
+  `PIPELINE_MAX_CONCURRENCY=10 npx tsx src/cli.ts run --count 500`)
+  without editing the config file. Per-institution state/processed/review
+  files are independent, so running several institutions concurrently is
+  safe with no locking needed.
+- **Progress reporting.** `pipeline run` prints a running progress line —
+  `progress: processed 42/500, approved 30, needs_review 8, rejected 4,
+  duplicates 6` — every `config/execution.json`'s `progressReportEvery`
+  completions (default every 5) and always once more at the end of the
+  batch, instead of only printing a final summary. Useful for a
+  long-running batch a human is watching in a terminal. `runPipeline()`
+  exposes this via an optional `onProgress` callback (`RunOptions`); the
+  CLI (`src/cli.ts`) is what actually prints it, keeping the orchestrator
+  itself free of console output, consistent with the existing split.
+- **Cost/token tracking (best-effort placeholder).** `services/llm-client.ts`
+  now accumulates `input_tokens`/`output_tokens` from OpenAI's Responses
+  API `usage` field (when the API returns it) across all real LLM calls in
+  a process, and `report.json` includes the running total as
+  `estimatedTokenUsage: { inputTokens, outputTokens, calls }`. This is
+  **token counts only — deliberately no dollar figure**, since OpenAI
+  pricing isn't verified anywhere in this codebase and would go stale the
+  moment it was written down; compute actual cost yourself against
+  https://platform.openai.com/docs/pricing for whichever `OPENAI_MODEL`
+  you run with. `--mock` mode makes no LLM calls, so `estimatedTokenUsage`
+  is always `{0, 0, 0}` there — this has been exercised (see validation
+  below), but the real (non-mock) accumulation itself has **not** been
+  exercised against a live API in this build environment, same caveat as
+  the rest of the real-mode code paths.
 
 ### Directory structure
 
@@ -91,6 +144,7 @@ src/
 config/
   thresholds.json           score cutoffs for the quality gate
   priority-categories.json  discovery priority order
+  execution.json            maxConcurrency / progressReportEvery for large batches (see below)
 
 data/
   fixtures/    synthetic mock-discovery.json / mock-research.json (tracked in git)
@@ -105,13 +159,17 @@ npm install
 
 # Mock mode — no API key needed, fully deterministic, safe to run anywhere:
 npx tsx src/cli.ts run --count 5 --mock
-npx tsx src/cli.ts run --count 20 --mock
+npx tsx src/cli.ts run --count 40 --mock
 npx tsx src/cli.ts validate
 npx tsx src/cli.ts export
 
 # Real mode — requires OPENAI_API_KEY (copy .env.example to .env first):
 export OPENAI_API_KEY=sk-...
 npx tsx src/cli.ts run --count 500
+
+# Optional: override the concurrency cap for a large real run without
+# editing config/execution.json:
+PIPELINE_MAX_CONCURRENCY=10 npx tsx src/cli.ts run --count 500
 ```
 
 - `--mock` (or `PIPELINE_MOCK=1`) makes Discovery and the Researcher read
@@ -228,14 +286,36 @@ NOT done:
   placeholders throughout — the researcher/extractor don't yet attempt to
   find pricing or multi-branch data, since the real schema's expectations
   for those fields are unknown.
+- The concurrency limiter, progress reporting, and token-usage accumulator
+  added in this pass are **scaffolding for a future real 500-institution
+  run, not a resolution of the two blockers above.** They have only ever
+  been exercised via `--mock` mode (no LLM calls happen there, so
+  `estimatedTokenUsage` is always `{0, 0, 0}` in every mock run) — the
+  concurrency limiter has never actually throttled real concurrent OpenAI
+  calls, and the token accumulator's real-mode wiring (reading
+  `response.usage` off an actual Responses API call) has not been
+  exercised against a live API in this build environment.
 
 ### What has been validated (see below for exact commands/results)
 
 - `pipeline run --count 5 --mock` end-to-end: DISCOVERED → ... →
   APPROVED/NEEDS_REVIEW, valid `bilimon-import.json` + `report.json`.
-- `pipeline run --count 21 --mock` (20 unique institutions after dedupe
-  collapses one deliberate duplicate pair) end-to-end, plus a second run
-  confirming idempotency (no reprocessing, no duplicate export entries).
-- `npm test`: 19 assertions covering slug determinism, phone validation,
-  dedupe collapse, enum rejection, and city-alias resolution — all
+- `pipeline run --count 40 --mock` (39 unique institutions after dedupe
+  collapses one deliberate duplicate pair) end-to-end, with the
+  concurrency limiter and periodic `progress: processed X/Y, ...` lines
+  both visibly exercised across the full batch.
+- Resumability with the new concurrency code: `pipeline run --count 20
+  --mock` followed by `pipeline run --count 40 --mock` (simulating an
+  interrupted job resumed with a larger target count) — confirmed the
+  first 19 institutions' outcomes were unchanged and only the newly-added
+  ones were processed, and that re-running the same `--count` twice in a
+  row is a no-op on outcomes (idempotency unaffected by the concurrency
+  changes).
+- `PIPELINE_MAX_CONCURRENCY=1` override confirmed to take effect (env var
+  takes priority over `config/execution.json`).
+- `npm test`: 29 assertions covering slug determinism, phone validation,
+  dedupe collapse, enum rejection, city-alias resolution, the concurrency
+  limiter's in-flight cap/ordering/edge cases, and the token-usage
+  accumulator's summing/reset/no-op-on-missing-usage behavior — all
   passing.
+- `npm run build` (`tsc`): clean, no errors.

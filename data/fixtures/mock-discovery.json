@@ -1,5 +1,5 @@
 {
-  "_FIXTURE_NOTICE": "SYNTHETIC TEST DATA ONLY. Every institution below is fictional, invented for exercising pipeline mechanics (discovery -> dedupe -> research -> content -> export -> validate) end to end without live network/API access. Names, phones, addresses, and websites are fake and must NEVER be treated as real discovered institutions or used in a real BilimOn import. See README.md 'Fixtures vs real data'.",
+  "_FIXTURE_NOTICE": "SYNTHETIC TEST DATA ONLY. Every one of the 40 institutions below (including one deliberate duplicate pair) is fictional, invented for exercising pipeline mechanics (discovery -> dedupe -> research -> content -> export -> validate) end to end without live network/API access, and at a scale large enough to visibly exercise the concurrency limiter and progress reporting. Names, phones, addresses, and websites are fake and must NEVER be treated as real discovered institutions or used in a real BilimOn import. See README.md 'Fixtures vs real data'.",
   "institutions": [
     {
       "fixtureId": "cambridge-lc",
@@ -231,6 +231,215 @@
       "telegram": "https://t.me/namanganieltszone_example",
       "instagram": null,
       "sourceUrl": "https://namangan-ieltszone-example.uz"
+    },
+    {
+      "fixtureId": "tashkent-robotics-club",
+      "rawName": "Tashkent Robotics Club",
+      "city": "Tashkent",
+      "category": "KIDS_EDUCATION",
+      "phone": "+998 90 111 22 88",
+      "website": "https://tashkent-roboticsclub-example.uz",
+      "telegram": "https://t.me/tashkentrobotics_example",
+      "instagram": "https://instagram.com/tashkentrobotics.example",
+      "sourceUrl": "https://tashkent-roboticsclub-example.uz"
+    },
+    {
+      "fixtureId": "samarkand-uniprep-plus",
+      "rawName": "Samarkand University Prep Plus",
+      "city": "Samarkand",
+      "category": "UNIVERSITY_PREP",
+      "phone": "+998 66 222 33 99",
+      "website": "https://samarkand-uniprepplus-example.uz",
+      "telegram": null,
+      "instagram": "https://instagram.com/samarkanduniprepplus.example",
+      "sourceUrl": "https://samarkand-uniprepplus-example.uz"
+    },
+    {
+      "fixtureId": "bukhara-ielts-corner",
+      "rawName": "Bukhara IELTS Corner",
+      "city": "Bukhara",
+      "category": "LANGUAGES",
+      "phone": "+998 65 333 44 11",
+      "website": "https://bukhara-ieltscorner-example.uz",
+      "telegram": "https://t.me/bukharaieltscorner_example",
+      "instagram": null,
+      "sourceUrl": "https://bukhara-ieltscorner-example.uz"
+    },
+    {
+      "fixtureId": "andijan-math-lyceum-prep",
+      "rawName": "Andijan Math Lyceum Prep",
+      "city": "Andijan",
+      "category": "SCHOOL_SUBJECTS",
+      "phone": "+998 74 444 55 66",
+      "website": "https://andijan-mathlyceumprep-example.uz",
+      "telegram": null,
+      "instagram": null,
+      "sourceUrl": "https://andijan-mathlyceumprep-example.uz"
+    },
+    {
+      "fixtureId": "fergana-uniprep-star",
+      "rawName": "Fergana University Prep Star",
+      "city": "Fergana",
+      "category": "UNIVERSITY_PREP",
+      "phone": "+998 73 555 66 22",
+      "website": "https://fergana-uniprepstar-example.uz",
+      "telegram": "https://t.me/ferganauniprepstar_example",
+      "instagram": null,
+      "sourceUrl": "https://fergana-uniprepstar-example.uz"
+    },
+    {
+      "fixtureId": "namangan-kids-arts",
+      "rawName": "Namangan Kids Arts Center",
+      "city": "Namangan",
+      "category": "KIDS_EDUCATION",
+      "phone": "+998 69 666 22 33",
+      "website": "https://namangan-kidsarts-example.uz",
+      "telegram": null,
+      "instagram": "https://instagram.com/namangankidsarts.example",
+      "sourceUrl": "https://namangan-kidsarts-example.uz"
+    },
+    {
+      "fixtureId": "nukus-school-support",
+      "rawName": "Nukus School Support Center",
+      "city": "Nukus",
+      "category": "SCHOOL_SUBJECTS",
+      "phone": "+998 61 777 33 44",
+      "website": "https://nukus-schoolsupport-example.uz",
+      "telegram": "https://t.me/nukusschoolsupport_example",
+      "instagram": null,
+      "sourceUrl": "https://nukus-schoolsupport-example.uz"
+    },
+    {
+      "fixtureId": "navoiy-english-plus",
+      "rawName": "Navoiy English Plus",
+      "city": "Navoiy",
+      "category": "LANGUAGES",
+      "phone": "+998 79 222 44 66",
+      "website": "https://navoiy-englishplus-example.uz",
+      "telegram": null,
+      "instagram": null,
+      "sourceUrl": "https://navoiy-englishplus-example.uz"
+    },
+    {
+      "fixtureId": "karshi-uniprep-hub",
+      "rawName": "Karshi University Prep Hub",
+      "city": "Karshi",
+      "category": "UNIVERSITY_PREP",
+      "phone": "+998 75 333 55 77",
+      "website": "https://karshi-uniprephub-example.uz",
+      "telegram": "https://t.me/karshiuniprephub_example",
+      "instagram": null,
+      "sourceUrl": "https://karshi-uniprephub-example.uz"
+    },
+    {
+      "fixtureId": "termez-kids-stem",
+      "rawName": "Termez Kids STEM Studio",
+      "city": "Termez",
+      "category": "KIDS_EDUCATION",
+      "phone": "+998 76 444 66 88",
+      "website": "https://termez-kidsstem-example.uz",
+      "telegram": null,
+      "instagram": "https://instagram.com/termezkidsstem.example",
+      "sourceUrl": "https://termez-kidsstem-example.uz"
+    },
+    {
+      "fixtureId": "jizzax-ielts-focus",
+      "rawName": "Jizzax IELTS Focus",
+      "city": "Jizzax",
+      "category": "LANGUAGES",
+      "phone": "+998 72 555 77 99",
+      "website": "https://jizzax-ieltsfocus-example.uz",
+      "telegram": "https://t.me/jizzaxieltsfocus_example",
+      "instagram": null,
+      "sourceUrl": "https://jizzax-ieltsfocus-example.uz"
+    },
+    {
+      "fixtureId": "gulistan-school-subjects-pro",
+      "rawName": "Gulistan School Subjects Pro",
+      "city": "Gulistan",
+      "category": "SCHOOL_SUBJECTS",
+      "phone": "+998 67 666 88 11",
+      "website": "https://gulistan-schoolsubjectspro-example.uz",
+      "telegram": null,
+      "instagram": null,
+      "sourceUrl": "https://gulistan-schoolsubjectspro-example.uz"
+    },
+    {
+      "fixtureId": "urgench-kids-creative",
+      "rawName": "Urgench Kids Creative Studio",
+      "city": "Urgench",
+      "category": "KIDS_EDUCATION",
+      "phone": "+998 62 777 99 22",
+      "website": "https://urgench-kidscreative-example.uz",
+      "telegram": "https://t.me/urgenchkidscreative_example",
+      "instagram": "https://instagram.com/urgenchkidscreative.example",
+      "sourceUrl": "https://urgench-kidscreative-example.uz"
+    },
+    {
+      "fixtureId": "tashkent-uniprep-elite",
+      "rawName": "Tashkent University Prep Elite",
+      "city": "Tashkent",
+      "category": "UNIVERSITY_PREP",
+      "phone": "+998 90 888 44 55",
+      "website": "https://tashkent-uniprepelite-example.uz",
+      "telegram": "https://t.me/tashkentuniprepelite_example",
+      "instagram": null,
+      "sourceUrl": "https://tashkent-uniprepelite-example.uz"
+    },
+    {
+      "fixtureId": "samarkand-kids-lab",
+      "rawName": "Samarkand Kids Discovery Lab",
+      "city": "Samarkand",
+      "category": "KIDS_EDUCATION",
+      "phone": "+998 66 999 22 44",
+      "website": "https://samarkand-kidslab-example.uz",
+      "telegram": null,
+      "instagram": "https://instagram.com/samarkandkidslab.example",
+      "sourceUrl": "https://samarkand-kidslab-example.uz"
+    },
+    {
+      "fixtureId": "bukhara-english-bridge",
+      "rawName": "Bukhara English Bridge",
+      "city": "Bukhara",
+      "category": "LANGUAGES",
+      "phone": "+998 65 111 33 66",
+      "website": "https://bukhara-englishbridge-example.uz",
+      "telegram": "https://t.me/bukharaenglishbridge_example",
+      "instagram": null,
+      "sourceUrl": "https://bukhara-englishbridge-example.uz"
+    },
+    {
+      "fixtureId": "andijan-ielts-plus",
+      "rawName": "Andijan IELTS Plus",
+      "city": "Andijan",
+      "category": "LANGUAGES",
+      "phone": "+998 74 222 44 77",
+      "website": "https://andijan-ieltsplus-example.uz",
+      "telegram": null,
+      "instagram": null,
+      "sourceUrl": "https://andijan-ieltsplus-example.uz"
+    },
+    {
+      "fixtureId": "fergana-school-support",
+      "rawName": "Fergana School Support Center",
+      "city": "Fergana",
+      "category": "SCHOOL_SUBJECTS",
+      "phone": "+998 73 333 55 88",
+      "website": "https://fergana-schoolsupport-example.uz",
+      "telegram": "https://t.me/ferganaschoolsupport_example",
+      "instagram": null,
+      "sourceUrl": "https://fergana-schoolsupport-example.uz"
+    },
+    {
+      "fixtureId": "namangan-uniprep-gate",
+      "rawName": "Namangan University Prep Gate",
+      "city": "Namangan",
+      "category": "UNIVERSITY_PREP",
+      "phone": "+998 69 444 66 99",
+      "website": "https://namangan-uniprepgate-example.uz",
+      "telegram": null,
+      "instagram": "https://instagram.com/namanganuniprepgate.example",
+      "sourceUrl": "https://namangan-uniprepgate-example.uz"
     }
   ]
 }

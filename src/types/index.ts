@@ -189,5 +189,11 @@ export interface ExportReport {
   duplicates: number;
   averageCompleteness: number;
   averageConfidence: number;
+  /** Best-effort running total of OpenAI token usage across this process's
+   * LLM calls (see services/llm-client.ts). Always {0,0,0} in --mock mode,
+   * since mock mode makes no LLM calls. Token counts only — no dollar
+   * figure; compute cost yourself against current OpenAI pricing for
+   * whichever OPENAI_MODEL was used. */
+  estimatedTokenUsage: { inputTokens: number; outputTokens: number; calls: number };
   generatedAt: string;
 }

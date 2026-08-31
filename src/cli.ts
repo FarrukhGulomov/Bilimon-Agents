@@ -50,7 +50,15 @@ async function cmdRun(flags: Record<string, string | boolean>) {
     return;
   }
   console.log(`Running pipeline: count=${count} mock=${mock}`);
-  const summary = await runPipeline({ count, mock });
+  const summary = await runPipeline({
+    count,
+    mock,
+    onProgress: (p) =>
+      console.log(
+        `progress: processed ${p.completed}/${p.total}, approved ${p.approved}, ` +
+          `needs_review ${p.needsReview}, rejected ${p.rejected}, duplicates ${p.duplicates}`
+      ),
+  });
   console.log(
     `Discovery+dedupe: ${summary.processedIds.length} unique candidates processed, ` +
       `${summary.duplicateIds.length} duplicates merged away.`
