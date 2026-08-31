@@ -25,6 +25,7 @@ import { runWithConcurrency } from "../src/services/concurrency.js";
 import { getTokenUsage, resetTokenUsage, recordUsage, coerceToResultArray } from "../src/services/llm-client.js";
 import { resolveBriefHeuristic, loadDefaultScope, resolveBrief } from "../src/services/brief-parser.js";
 import { discoverMock } from "../src/agents/discovery.js";
+import { buildExportRecord } from "../src/agents/bilimon-exporter.js";
 import type { BilimOnExportRecord } from "../src/types/index.js";
 
 const REAL_TASHKENT_CITY_ID = "cmrfw8t3y000fn3og703hdh1a";
@@ -426,6 +427,26 @@ console.log("9b. resolveBrief() applies city-name detection unconditionally, not
     if (savedKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = savedKey;
   }
+}
+
+console.log("9c. buildExportRecord: a genuinely missing phone is legal (real data: 86% of records have phone:null), not a build error");
+{
+  // Real production bug: normalizePhone(undefined) returned invalid, and
+  // buildExportRecord treated that as a hard failure — rejecting the
+  // overwhelming majority of real-shaped candidates, since most real
+  // BilimOn institutions have no phone on file at all.
+  const baseFields = { nameLatin: "Star Kids International", city: "Tashkent" };
+  const baseContent = { descriptionUz: null, descriptionRu: null, needsContentReview: false };
+
+  const noPhone = buildExportRecord("id1", "star-kids-international", "star kids international", baseFields, baseContent);
+  assert(noPhone.record !== null, `a candidate with no phone at all still builds successfully (errors: ${JSON.stringify(noPhone.buildErrors)})`);
+  assert(noPhone.record?.phone === null, "the resulting record has phone: null, matching real BilimOn data's common case");
+
+  const badPhone = buildExportRecord("id2", "slug", "namekey", { ...baseFields, phone: "not-a-real-number" }, baseContent);
+  assert(badPhone.record === null, "a phone that WAS supplied but doesn't parse as real is still a build error (unlike a missing one)");
+
+  const goodPhone = buildExportRecord("id3", "slug", "namekey", { ...baseFields, phone: "+998712000004" }, baseContent);
+  assert(goodPhone.record?.phone === "+998712000004", "a valid supplied phone is still normalized and kept");
 }
 
 console.log("9. --mock discovery filters/prioritizes fixtures by the resolved DiscoveryScope");
