@@ -169,7 +169,7 @@ function matchKeywords<T extends string>(
  * meant as a HARD restriction in discovery.ts (not just a soft hint) —
  * this exists specifically so e.g. `--brief "Toshkentda"` searches only
  * Tashkent instead of all 9 seed cities, bounding real API cost/time. */
-function matchCityNames(briefLower: string): { matched: string[]; hits: string[] } {
+export function matchCityNames(briefLower: string): { matched: string[]; hits: string[] } {
   const matched = new Set<string>();
   const hits = new Set<string>();
   for (const city of listCities()) {
@@ -279,14 +279,29 @@ export async function resolveBrief(brief: string | undefined | null): Promise<Di
   if (!brief || !brief.trim()) {
     return loadDefaultScope();
   }
+
+  let scope: DiscoveryScope;
   if (process.env.OPENAI_API_KEY) {
     try {
-      return await resolveBriefWithLlm(brief);
+      scope = await resolveBriefWithLlm(brief);
     } catch (err) {
       console.warn(`brief-parser: LLM mode failed (${(err as Error).message}) — falling back to heuristic keyword matching.`);
-      const fallback = resolveBriefHeuristic(brief);
-      return { ...fallback, source: "llm-fallback" };
+      scope = { ...resolveBriefHeuristic(brief), source: "llm-fallback" };
     }
+  } else {
+    scope = resolveBriefHeuristic(brief);
   }
-  return resolveBriefHeuristic(brief);
+
+  // City-name recognition is deterministic and free (no LLM call needed),
+  // and controls real API cost directly (how many cities discovery.ts
+  // searches) — so it always runs and overrides `regions`/`keywords`
+  // regardless of which path produced `scope` above. Real bug this fixes:
+  // resolveBriefWithLlm's schema never asked for/returned `regions` at
+  // all, so a real run with an OPENAI_API_KEY set (LLM mode) silently
+  // ignored a brief naming a city entirely, searching all seed cities.
+  const { matched: cities, hits: cityHits } = matchCityNames(brief.trim().toLowerCase());
+  if (cities.length > 0) {
+    scope = { ...scope, regions: cities, keywords: [...new Set([...scope.keywords, ...cityHits])] };
+  }
+  return scope;
 }

@@ -404,6 +404,30 @@ console.log("9a. resolveBriefHeuristic recognizes a named city as a hard regions
   );
 }
 
+console.log("9b. resolveBrief() applies city-name detection unconditionally, not just inside resolveBriefHeuristic");
+{
+  // Real production bug: with OPENAI_API_KEY set, resolveBrief took the LLM
+  // path, whose schema never asked for/returned `regions` at all — a brief
+  // naming a city silently searched every seed city anyway. The fix moved
+  // city detection to run once in resolveBrief() itself, after either path
+  // returns, rather than only inside resolveBriefHeuristic. This exercises
+  // resolveBrief() (not resolveBriefHeuristic() directly) with no API key
+  // set — the only path safely exercisable without a real network call —
+  // to pin that the override is wired at the resolveBrief() level.
+  const savedKey = process.env.OPENAI_API_KEY;
+  try {
+    delete process.env.OPENAI_API_KEY;
+    const scope = await resolveBrief("Toshkentda IELTS markazlari");
+    assert(
+      JSON.stringify(scope.regions) === JSON.stringify(["Tashkent"]),
+      `resolveBrief() resolves regions to Tashkent (got ${JSON.stringify(scope.regions)})`
+    );
+  } finally {
+    if (savedKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = savedKey;
+  }
+}
+
 console.log("9. --mock discovery filters/prioritizes fixtures by the resolved DiscoveryScope");
 {
   const all40 = discoverMock(40, loadDefaultScope());
