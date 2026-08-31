@@ -16,6 +16,8 @@ import { dirname, join } from "node:path";
 import { searchInstitutions } from "../services/search.js";
 import { listCities } from "../services/location-mapper.js";
 import { loadDefaultScope, type DiscoveryScope } from "../services/brief-parser.js";
+import { runWithConcurrency } from "../services/concurrency.js";
+import { loadExecutionConfig } from "../services/execution-config.js";
 import { CATEGORIES, type InstitutionType, type Category } from "../schemas/enums.js";
 import type { DiscoveredInstitution } from "../types/index.js";
 
@@ -128,20 +130,47 @@ function buildSearchFacets(scope: DiscoveryScope): SearchFacet[] {
   return [...CATEGORIES].map((category) => ({ category }));
 }
 
+/** One (facet, city) live web-search unit of work. The default scope alone
+ * is 4 categories x 9 cities = 36 possible searches; run sequentially
+ * (the original implementation) that's up to 36 slow (tens of seconds
+ * each) OpenAI web-search calls back-to-back before ever reaching the
+ * per-institution stages — observed in practice as a multi-minute "nothing
+ * is happening" real run. runWithConcurrency + shouldStop below bounds
+ * both the wall-clock time (searches run `maxConcurrency` at a time) and
+ * the worst-case overshoot past `count` (at most `maxConcurrency` searches
+ * already in flight when the target is reached, never the full facet x
+ * city cross product). */
+interface SearchUnit {
+  facet: SearchFacet;
+  city: ReturnType<typeof listCities>[number];
+}
+
 export async function discoverLive(
   count: number,
   scope: DiscoveryScope = loadDefaultScope()
 ): Promise<DiscoveryCandidate[]> {
   const facets = buildSearchFacets(scope);
   const cities = listCities();
-  const results: DiscoveryCandidate[] = [];
+  const units: SearchUnit[] = [];
+  for (const facet of facets) for (const city of cities) units.push({ facet, city });
 
-  outer: for (const facet of facets) {
-    for (const city of cities) {
-      if (results.length >= count) break outer;
+  const { maxConcurrency } = loadExecutionConfig();
+  const results: DiscoveryCandidate[] = [];
+  let searchesStarted = 0;
+
+  await runWithConcurrency({
+    items: units,
+    limit: maxConcurrency,
+    shouldStop: () => results.length >= count,
+    worker: async ({ facet, city }) => {
+      const n = ++searchesStarted;
+      console.log(
+        `Discovery: search ${n}/${units.length} — city=${city.nameEn}` +
+          (facet.category ? ` category=${facet.category}` : "") +
+          (facet.type ? ` type=${facet.type}` : "")
+      );
       const found = await searchInstitutions(city.nameEn, facet.category, facet.type);
       for (const f of found) {
-        if (results.length >= count) break;
         results.push({
           discoveryId: `${f.url}`,
           rawName: f.title,
@@ -154,9 +183,14 @@ export async function discoverLive(
           discoveredAt: new Date().toISOString(),
         });
       }
-    }
-  }
-  return results;
+    },
+  });
+
+  // Concurrent workers can overshoot `count` slightly (multiple in-flight
+  // searches settling around the same time, each potentially returning
+  // several results) — cap to `count` here, matching discoverMock's
+  // contract of returning at most `count` candidates.
+  return results.slice(0, count);
 }
 
 export async function runDiscovery(

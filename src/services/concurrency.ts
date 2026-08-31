@@ -19,16 +19,24 @@ export interface RunWithConcurrencyOptions<T, R> {
   /** Called synchronously right after each item settles (fulfilled result only —
    * `worker` is expected to catch its own errors and encode them in R). */
   onSettled?: (result: R, item: T, index: number) => void;
+  /** Checked before each worker claims its NEXT item (never cancels
+   * in-flight work). Once it returns true, idle workers stop pulling new
+   * items — up to `limit` items already in flight may still complete, but
+   * no new ones start. Use this to bound cost/time on unbounded search
+   * spaces (e.g. discovery iterating category x city combinations) once
+   * "enough" results have already been found. */
+  shouldStop?: () => boolean;
 }
 
 export async function runWithConcurrency<T, R>(opts: RunWithConcurrencyOptions<T, R>): Promise<R[]> {
-  const { items, worker, onSettled } = opts;
+  const { items, worker, onSettled, shouldStop } = opts;
   const limit = Math.max(1, Math.floor(opts.limit) || 1);
   const results: R[] = new Array(items.length);
   let nextIndex = 0;
 
   async function runWorker(): Promise<void> {
     for (;;) {
+      if (shouldStop?.()) return;
       const current = nextIndex;
       nextIndex += 1;
       if (current >= items.length) return;
