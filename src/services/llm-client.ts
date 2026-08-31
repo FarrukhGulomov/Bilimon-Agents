@@ -88,7 +88,14 @@ function getClient(): OpenAI {
     throw new MissingApiKeyError();
   }
   if (!client) {
-    client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    // A web-search-augmented call can legitimately take a while, but with no
+    // timeout at all a stalled connection hangs forever with zero signal —
+    // observed as "logs stopped moving, no error, no result" during the
+    // first real Railway run. 120s is generous for a single Responses API
+    // call (including the model's own tool-use round-trip); override with
+    // OPENAI_TIMEOUT_MS if a given deployment needs more/less.
+    const timeoutMs = Number(process.env.OPENAI_TIMEOUT_MS ?? 120_000);
+    client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: timeoutMs, maxRetries: 2 });
   }
   return client;
 }
