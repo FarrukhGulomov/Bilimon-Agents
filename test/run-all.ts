@@ -265,6 +265,29 @@ console.log("6. runWithConcurrency caps in-flight work and preserves per-item re
 
     const emptyResults = await runWithConcurrency({ items: [], limit: 5, worker: async (x) => x });
     assert(emptyResults.length === 0, "an empty items array resolves immediately with an empty result array");
+
+    // shouldStop: used by discoverLive to bound wall-clock time/cost once
+    // enough live-search candidates are found, instead of exhausting the
+    // full category x city search space sequentially (real production
+    // slowness observed on Railway, fixed alongside this test).
+    let started = 0;
+    let foundEnough = 0;
+    await runWithConcurrency({
+      items: Array.from({ length: 50 }, (_, i) => i),
+      limit: 4,
+      shouldStop: () => foundEnough >= 3,
+      worker: async (item) => {
+        started++;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        foundEnough++;
+        return item;
+      },
+    });
+    assert(
+      started < 50 && started >= 3,
+      `shouldStop halts new work once satisfied instead of exhausting all items (started ${started}/50)`
+    );
+    assert(started <= 3 + 4, `overshoot past the stop condition is bounded by \`limit\` (started ${started})`);
   })();
 }
 

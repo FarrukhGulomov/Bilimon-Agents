@@ -159,7 +159,9 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
   const scope = await resolveBrief(opts.brief);
   persistLastScope(scope);
   if (!opts.mock) {
-    console.log("Discovery: running live web search (this can take a while — no OpenAI call in this pipeline has a client-side timeout yet, so a stalled network request looks identical to a slow one)...");
+    console.log(
+      "Discovery: running live web search (per-search progress logs below; each search can take tens of seconds)..."
+    );
   }
   const candidates = await runDiscovery(opts.count, opts.mock, scope);
   if (!opts.mock) {
