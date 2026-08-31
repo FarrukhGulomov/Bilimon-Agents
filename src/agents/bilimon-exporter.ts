@@ -1,7 +1,9 @@
 /**
- * Builds a PLACEHOLDER BilimOnExportRecord from merged research fields +
+ * Builds a REAL-schema BilimOnExportRecord from merged research fields +
  * generated content, and writes the final data/export/bilimon-import.json
- * (APPROVED records only) and data/export/report.json.
+ * (APPROVED records only) and data/export/report.json. This never writes a
+ * copy of data/reference/bilimon-institutions-reference.json itself —
+ * bilimon-import.json only ever contains pipeline-processed candidates.
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -15,6 +17,7 @@ import type {
 import type { ContentResult } from "./content-manager.js";
 import { resolveCity } from "../services/location-mapper.js";
 import { normalizePhone } from "../services/normalizer.js";
+import { getTokenUsage } from "../services/llm-client.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXPORT_DIR = join(__dirname, "..", "..", "data", "export");
@@ -27,10 +30,19 @@ export interface BuildRecordResult {
 }
 
 /**
- * Maps merged evidence fields + generated content into the placeholder
- * BilimOn export shape. Returns buildErrors for anything that could not be
+ * Maps merged evidence fields + generated content into the real BilimOn
+ * export shape. Returns buildErrors for anything that could not be
  * resolved (e.g. unmapped city, invalid phone) so the caller can route the
- * record to NEEDS_REVIEW instead of silently guessing.
+ * record to NEEDS_REVIEW instead of silently guessing — in particular, a
+ * city not present in the real reference data's 8 covered regions (see
+ * schemas/locations.ts) always fails to resolve here rather than being
+ * assigned a fabricated cityId/regionId.
+ *
+ * `id` here is the pipeline-internal id (see services/normalizer.ts) used
+ * only for state/processed/review filenames — it is deliberately NOT
+ * written into the returned record's `id` field; see BilimOnExportRecord.id
+ * in src/types/index.ts for the open question on BilimOn's real id
+ * convention that this defaults against.
  */
 export function buildExportRecord(
   id: string,
@@ -43,14 +55,21 @@ export function buildExportRecord(
 
   const cityRes = resolveCity(fields.city);
   if (!cityRes) {
-    buildErrors.push(`could not resolve city "${fields.city ?? "(missing)"}" against the placeholder location table`);
+    buildErrors.push(`could not resolve city "${fields.city ?? "(missing)"}" — city not present in known BilimOn reference data — real cityId/regionId unconfirmed`);
   }
 
   const phoneRes = normalizePhone(fields.phone);
   if (!phoneRes.valid) {
     buildErrors.push(`invalid/missing phone: ${phoneRes.reason}`);
   }
-  const phone2Res = fields.phone2 ? normalizePhone(fields.phone2) : null;
+  // Real BilimOn phone2 values sometimes hold multiple comma-separated
+  // numbers in one string (e.g. "+998909007966,+998944130900"). Normalize
+  // the first number if possible; otherwise pass the raw value through as-is
+  // rather than dropping it, since BilimOn's own field accepts a free-form
+  // string here.
+  const rawPhone2 = fields.phone2?.trim() || null;
+  const isMultiNumberPhone2 = !!rawPhone2 && rawPhone2.includes(",");
+  const normalizedPhone2 = rawPhone2 && !isMultiNumberPhone2 ? normalizePhone(rawPhone2) : null;
 
   if (!fields.nameUz && !fields.nameLatin) {
     buildErrors.push("no nameUz/nameLatin available");
@@ -61,7 +80,7 @@ export function buildExportRecord(
   }
 
   const record: BilimOnExportRecord = {
-    id,
+    id: null, // see doc comment on BilimOnExportRecord.id — open question, not yet fabricated
     nameUz: fields.nameUz ?? fields.nameLatin!,
     nameRu: fields.nameRu ?? fields.nameUz ?? fields.nameLatin!,
     nameKey,
@@ -70,7 +89,10 @@ export function buildExportRecord(
     additionalTypes: fields.additionalTypes ?? [],
     status: "PENDING",
     phone: phoneRes.normalized!,
-    phone2: phone2Res?.valid ? phone2Res.normalized! : null,
+    // Multi-number strings (e.g. "+998909007966,+998944130900") pass through
+    // as-is rather than being rejected; a single number is normalized when
+    // it validates, otherwise passed through raw rather than dropped.
+    phone2: isMultiNumberPhone2 ? rawPhone2 : normalizedPhone2?.valid ? normalizedPhone2.normalized! : rawPhone2,
     email: fields.email ?? null,
     website: fields.website ?? null,
     telegram: fields.telegram ?? null,
@@ -171,6 +193,7 @@ export function exportFinalArtifacts(): { importPath: string; reportPath: string
     duplicates,
     averageCompleteness: scoredCount > 0 ? Math.round(completenessSum / scoredCount) : 0,
     averageConfidence: scoredCount > 0 ? Math.round(confidenceSum / scoredCount) : 0,
+    estimatedTokenUsage: getTokenUsage(),
     generatedAt: new Date().toISOString(),
   };
   const reportPath = join(EXPORT_DIR, "report.json");

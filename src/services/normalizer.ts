@@ -51,10 +51,18 @@ export function slugify(...parts: string[]): string {
   return s;
 }
 
-/** Deterministic id: stable slug-based string id (see schema doc assumption). */
+/**
+ * Deterministic, pipeline-internal id: a stable slug-based string, prefixed
+ * so it can never be confused with a real BilimOn cuid (which looks like
+ * "cmrfw8t5o001an3ogocewc8g6" — see data/reference/bilimon-institutions-reference.json).
+ * This id keys data/state|processed|review/<id>.json for idempotent reruns;
+ * it is NOT written to BilimOnExportRecord.id — see that field's doc
+ * comment in src/types/index.ts for the still-open question on what value
+ * (if any) BilimOn's real import expects there.
+ */
 export function generateId(nameKey: string, city: string): string {
   const base = slugify(nameKey, city);
-  return base;
+  return `pipeline-${base}`;
 }
 
 /** Deterministic short hash, used for cache filenames and disambiguation suffixes. */
@@ -68,7 +76,15 @@ export interface PhoneNormalizeResult {
   reason?: string;
 }
 
-/** Normalize a phone number to +998XXXXXXXXX (Uzbekistan), rejecting malformed input. */
+/**
+ * Normalize a phone number to +998XXXXXXXXX (Uzbekistan), rejecting malformed
+ * input. Handles a single number only — real BilimOn `phone2` values
+ * sometimes hold multiple comma-separated numbers in one string (e.g.
+ * "+998909007966,+998944130900"); callers that need to normalize a `phone2`
+ * value should split on "," first (see agents/bilimon-exporter.ts) rather
+ * than rejecting the whole field, since BilimOn's own field accepts this
+ * free-form shape.
+ */
 export function normalizePhone(raw: string | null | undefined): PhoneNormalizeResult {
   if (!raw || !raw.trim()) {
     return { valid: false, reason: "empty phone" };

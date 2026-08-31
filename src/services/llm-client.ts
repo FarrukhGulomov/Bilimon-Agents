@@ -45,6 +45,42 @@ export class MissingApiKeyError extends Error {
   }
 }
 
+// --- Best-effort token usage accumulator ---------------------------------
+// The OpenAI SDK's `response.usage` (Responses API) reports input_tokens /
+// output_tokens per call when the API returns usage info. This is a plain
+// in-process running total for the current `pipeline run` invocation —
+// not persisted, and reset per process. Included in the final report.json
+// as `estimatedTokenUsage` so a human watching a large real batch run
+// (batches can be any size) has a rough sense of LLM volume. Deliberately
+// token counts only, no dollar figure: pricing is not verified in this
+// codebase and would go stale immediately — compute cost yourself against
+// https://platform.openai.com/docs/pricing for whatever OPENAI_MODEL is in
+// use. Untouched in --mock mode, since no LLM calls happen there.
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  calls: number;
+}
+
+let tokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, calls: 0 };
+
+/** Exported (not just internal) so test/run-all.ts can exercise the
+ * accumulator's math without making a real OpenAI call. */
+export function recordUsage(usage: { input_tokens?: number; output_tokens?: number } | null | undefined): void {
+  if (!usage) return;
+  tokenUsage.inputTokens += usage.input_tokens ?? 0;
+  tokenUsage.outputTokens += usage.output_tokens ?? 0;
+  tokenUsage.calls += 1;
+}
+
+export function getTokenUsage(): TokenUsage {
+  return { ...tokenUsage };
+}
+
+export function resetTokenUsage(): void {
+  tokenUsage = { inputTokens: 0, outputTokens: 0, calls: 0 };
+}
+
 let client: OpenAI | null = null;
 
 function getClient(): OpenAI {
@@ -88,6 +124,7 @@ export async function askStructured<T>(params: AskStructuredParams): Promise<T> 
     instructions: `${params.system}\n\nRespond with ONLY a single JSON object matching this shape (no prose, no markdown fences):\n${params.schemaDescription}`,
     input: params.prompt,
   });
+  recordUsage(response.usage);
   const text = response.output_text;
   if (!text) {
     throw new Error("LLM response contained no output text to parse as JSON");
@@ -132,6 +169,7 @@ export async function webSearchAndSummarize(query: string, instructions: string)
       `[{"title": string, "url": string, "snippet": string}]`,
     input: query,
   });
+  recordUsage(response.usage);
   const text = response.output_text;
   if (!text) return [];
   try {

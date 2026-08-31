@@ -1,0 +1,5 @@
+{
+  "_comment": "Scale/execution config for large runs. There is no fixed target count — the pipeline is meant to run in batches of any size and eventually cover all learning institutions nationwide as more are discovered. maxConcurrency caps how many institutions are in-flight at once through the LLM-heavy Researcher/Content-Manager stages of the orchestrator loop, so a large batch doesn't fire hundreds of simultaneous LLM calls. Override per-run with the PIPELINE_MAX_CONCURRENCY env var without editing this file. progressReportEvery controls how often (in institutions completed) the orchestrator emits a running progress line while processing a batch.",
+  "maxConcurrency": 5,
+  "progressReportEvery": 5
+}

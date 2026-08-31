@@ -1,5 +1,5 @@
 {
-  "_FIXTURE_NOTICE": "SYNTHETIC TEST DATA ONLY — see mock-discovery.json header. This file stands in for the Deep Research agent's evidence-gathering output so the pipeline can be exercised end to end without live network/API access. All addresses, founder years, counts, and descriptions are fictional.",
+  "_FIXTURE_NOTICE": "SYNTHETIC TEST DATA ONLY — see mock-discovery.json header. This file stands in for the Deep Research agent's evidence-gathering output for all 40 fixture institutions, so the pipeline can be exercised end to end without live network/API access. All addresses, founder years, counts, and descriptions are fictional.",
   "byFixtureId": {
     "cambridge-lc": {
       "evidence": [
@@ -25,7 +25,7 @@
             "foundedYear": 2015,
             "studentCount": 340,
             "teacherCount": 18,
-            "languages": ["UZ", "RU", "EN"],
+            "languages": ["uz", "ru", "en"],
             "programs": ["General English", "IELTS Preparation", "Kids English"],
             "shifts": ["morning", "evening"],
             "specializations": ["IELTS", "General English"],
@@ -75,7 +75,7 @@
             "foundedYear": 2018,
             "studentCount": 210,
             "teacherCount": 12,
-            "languages": ["UZ", "EN"],
+            "languages": ["uz", "en"],
             "programs": ["IELTS Preparation", "Academic Writing"],
             "shifts": ["evening"],
             "specializations": ["IELTS"],
@@ -106,7 +106,7 @@
             "foundedYear": 2019,
             "studentCount": 150,
             "teacherCount": 9,
-            "languages": ["UZ", "RU"],
+            "languages": ["uz", "ru"],
             "programs": ["Mathematics", "Physics", "Chemistry"],
             "shifts": ["afternoon", "evening"],
             "specializations": ["School Subjects"],
@@ -137,7 +137,7 @@
             "foundedYear": 2016,
             "studentCount": 260,
             "teacherCount": 14,
-            "languages": ["UZ", "RU"],
+            "languages": ["uz", "ru"],
             "programs": ["University Entrance Exam Prep", "Math Olympiad Prep"],
             "shifts": ["morning", "afternoon"],
             "specializations": ["University Entrance Prep"],
@@ -169,7 +169,7 @@
             "foundedYear": 2020,
             "studentCount": 95,
             "teacherCount": 7,
-            "languages": ["UZ"],
+            "languages": ["uz"],
             "programs": ["Early Development", "Creative Arts", "Logic Games"],
             "shifts": ["morning"],
             "specializations": ["Kids Development"],
@@ -199,7 +199,7 @@
             "foundedYear": 2017,
             "studentCount": 180,
             "teacherCount": 10,
-            "languages": ["UZ", "EN"],
+            "languages": ["uz", "en"],
             "programs": ["General English", "Business English"],
             "shifts": ["morning", "evening"],
             "specializations": ["General English"],
@@ -223,7 +223,7 @@
             "instagram": "https://instagram.com/namanganmathclub.example",
             "city": "Namangan",
             "deliveryMode": "OFFLINE",
-            "languages": ["UZ"],
+            "languages": ["uz"],
             "programs": ["Mathematics Olympiad Training"],
             "specializations": ["School Subjects"],
             "categories": ["SCHOOL_SUBJECTS"],
@@ -251,7 +251,7 @@
             "foundedYear": 2021,
             "studentCount": 70,
             "teacherCount": 5,
-            "languages": ["UZ", "RU", "EN"],
+            "languages": ["uz", "ru", "en"],
             "programs": ["IELTS Preparation"],
             "specializations": ["IELTS"],
             "categories": ["LANGUAGES", "IELTS"],
@@ -273,7 +273,7 @@
             "website": "https://navoiy-uniprep-example.uz",
             "city": "Navoiy",
             "deliveryMode": "OFFLINE",
-            "languages": ["UZ"],
+            "languages": ["uz"],
             "programs": ["University Entrance Exam Prep"],
             "specializations": ["University Entrance Prep"],
             "categories": ["UNIVERSITY_PREP"],
@@ -302,7 +302,7 @@
             "foundedYear": 2019,
             "studentCount": 110,
             "teacherCount": 8,
-            "languages": ["UZ"],
+            "languages": ["uz"],
             "programs": ["Early Development", "Robotics for Kids"],
             "specializations": ["Kids Development"],
             "categories": ["KIDS_EDUCATION"],
@@ -325,7 +325,7 @@
             "telegram": "https://t.me/termezlanguagehouse_example",
             "city": "Termez",
             "deliveryMode": "OFFLINE",
-            "languages": ["UZ", "EN"],
+            "languages": ["uz", "en"],
             "programs": ["General English"],
             "specializations": ["General English"],
             "categories": ["LANGUAGES"],
@@ -348,7 +348,7 @@
             "instagram": "https://instagram.com/jizzaxschoolsupport.example",
             "city": "Jizzax",
             "deliveryMode": "OFFLINE",
-            "languages": ["UZ"],
+            "languages": ["uz"],
             "programs": ["Homework Support", "Exam Prep"],
             "specializations": ["School Subjects"],
             "categories": ["SCHOOL_SUBJECTS"],
@@ -371,7 +371,7 @@
             "telegram": "https://t.me/gulistanieltslab_example",
             "city": "Gulistan",
             "deliveryMode": "HYBRID",
-            "languages": ["UZ", "EN"],
+            "languages": ["uz", "en"],
             "programs": ["IELTS Preparation"],
             "specializations": ["IELTS"],
             "categories": ["LANGUAGES", "IELTS"],
@@ -393,7 +393,7 @@
             "website": "https://urgench-uniprep-example.uz",
             "city": "Urgench",
             "deliveryMode": "OFFLINE",
-            "languages": ["UZ"],
+            "languages": ["uz"],
             "programs": ["University Entrance Exam Prep"],
             "specializations": ["University Entrance Prep"],
             "categories": ["UNIVERSITY_PREP"],
@@ -422,7 +422,7 @@
             "foundedYear": 2021,
             "studentCount": 130,
             "teacherCount": 11,
-            "languages": ["UZ", "RU"],
+            "languages": ["uz", "ru"],
             "programs": ["STEM for Kids", "Creative Arts"],
             "specializations": ["Kids Development"],
             "categories": ["KIDS_EDUCATION"],
@@ -445,7 +445,7 @@
             "telegram": "https://t.me/samarkandenglishpro_example",
             "city": "Samarkand",
             "deliveryMode": "OFFLINE",
-            "languages": ["UZ", "EN"],
+            "languages": ["uz", "en"],
             "programs": ["General English", "Kids English"],
             "specializations": ["General English"],
             "categories": ["LANGUAGES"],
@@ -468,7 +468,7 @@
             "instagram": "https://instagram.com/bukharamathscience.example",
             "city": "Bukhara",
             "deliveryMode": "OFFLINE",
-            "languages": ["UZ"],
+            "languages": ["uz"],
             "programs": ["Mathematics", "Biology"],
             "specializations": ["School Subjects"],
             "categories": ["SCHOOL_SUBJECTS"],
@@ -491,7 +491,7 @@
             "telegram": "https://t.me/andijanuniprep_example",
             "city": "Andijan",
             "deliveryMode": "OFFLINE",
-            "languages": ["UZ"],
+            "languages": ["uz"],
             "programs": ["University Entrance Exam Prep"],
             "specializations": ["University Entrance Prep"],
             "categories": ["UNIVERSITY_PREP"],
@@ -514,7 +514,7 @@
             "instagram": "https://instagram.com/ferganakidscreative.example",
             "city": "Fergana",
             "deliveryMode": "OFFLINE",
-            "languages": ["UZ"],
+            "languages": ["uz"],
             "programs": ["Creative Arts", "Music for Kids"],
             "specializations": ["Kids Development"],
             "categories": ["KIDS_EDUCATION"],
@@ -537,11 +537,478 @@
             "telegram": "https://t.me/namanganieltszone_example",
             "city": "Namangan",
             "deliveryMode": "OFFLINE",
-            "languages": ["UZ"],
+            "languages": ["uz"],
             "programs": ["IELTS Preparation"],
             "specializations": ["IELTS"],
             "categories": ["LANGUAGES", "IELTS"],
             "descriptionSourceText": "Namangan IELTS Zone is a newly opened center offering IELTS classes."
+          }
+        }
+      ]
+    },
+    "tashkent-robotics-club": {
+      "evidence": [
+        {
+          "sourceUrl": "https://tashkent-roboticsclub-example.uz",
+          "sourceType": "website",
+          "confidence": 0.82,
+          "extractedFields": {
+            "nameUz": "Toshkent robototexnika klubi",
+            "nameRu": "Ташкентский клуб робототехники",
+            "type": "COURSE_CENTER",
+            "phone": "+998901112288",
+            "website": "https://tashkent-roboticsclub-example.uz",
+            "telegram": "https://t.me/tashkentrobotics_example",
+            "instagram": "https://instagram.com/tashkentrobotics.example",
+            "city": "Tashkent",
+            "address": "Chilonzor tumani, 9-kvartal, Tashkent",
+            "deliveryMode": "OFFLINE",
+            "foundedYear": 2020,
+            "studentCount": 160,
+            "teacherCount": 10,
+            "languages": ["uz", "ru"],
+            "programs": ["Robotics for Kids", "STEM for Kids"],
+            "specializations": ["Kids Development"],
+            "categories": ["KIDS_EDUCATION"],
+            "descriptionSourceText": "Tashkent Robotics Club runs beginner and intermediate robotics courses for children aged 7-14."
+          }
+        }
+      ]
+    },
+    "samarkand-uniprep-plus": {
+      "evidence": [
+        {
+          "sourceUrl": "https://samarkand-uniprepplus-example.uz",
+          "sourceType": "website",
+          "confidence": 0.76,
+          "extractedFields": {
+            "nameUz": "Samarqand universitetga tayyorlov plyus",
+            "type": "COURSE_CENTER",
+            "phone": "+998662223399",
+            "website": "https://samarkand-uniprepplus-example.uz",
+            "instagram": "https://instagram.com/samarkanduniprepplus.example",
+            "city": "Samarkand",
+            "deliveryMode": "OFFLINE",
+            "foundedYear": 2017,
+            "studentCount": 190,
+            "teacherCount": 13,
+            "languages": ["uz", "ru"],
+            "programs": ["University Entrance Exam Prep"],
+            "specializations": ["University Entrance Prep"],
+            "categories": ["UNIVERSITY_PREP"],
+            "descriptionSourceText": "Samarkand University Prep Plus prepares graduates for national entrance exams across science and humanities tracks."
+          }
+        }
+      ]
+    },
+    "bukhara-ielts-corner": {
+      "evidence": [
+        {
+          "sourceUrl": "https://bukhara-ieltscorner-example.uz",
+          "sourceType": "website",
+          "confidence": 0.69,
+          "extractedFields": {
+            "nameUz": "Buxoro IELTS burchagi",
+            "type": "LANGUAGE_CENTER",
+            "phone": "+998653334411",
+            "website": "https://bukhara-ieltscorner-example.uz",
+            "telegram": "https://t.me/bukharaieltscorner_example",
+            "city": "Bukhara",
+            "deliveryMode": "OFFLINE",
+            "languages": ["uz", "en"],
+            "programs": ["IELTS Preparation"],
+            "specializations": ["IELTS"],
+            "categories": ["LANGUAGES", "IELTS"],
+            "descriptionSourceText": "Bukhara IELTS Corner offers small-group IELTS preparation classes."
+          }
+        }
+      ]
+    },
+    "andijan-math-lyceum-prep": {
+      "evidence": [
+        {
+          "sourceUrl": "https://andijan-mathlyceumprep-example.uz",
+          "sourceType": "website",
+          "confidence": 0.57,
+          "extractedFields": {
+            "nameUz": "Andijon matematika litseyiga tayyorlov",
+            "type": "TUTORING",
+            "phone": "+998744445566",
+            "website": "https://andijan-mathlyceumprep-example.uz",
+            "city": "Andijan",
+            "deliveryMode": "OFFLINE",
+            "languages": ["uz"],
+            "programs": ["Mathematics Lyceum Entrance Prep"],
+            "specializations": ["School Subjects"],
+            "categories": ["SCHOOL_SUBJECTS"],
+            "descriptionSourceText": "Andijan Math Lyceum Prep coaches middle-schoolers for specialized math-lyceum entrance exams."
+          }
+        }
+      ]
+    },
+    "fergana-uniprep-star": {
+      "evidence": [
+        {
+          "sourceUrl": "https://fergana-uniprepstar-example.uz",
+          "sourceType": "website",
+          "confidence": 0.71,
+          "extractedFields": {
+            "nameUz": "Farg'ona universitetga tayyorlov yulduzi",
+            "nameRu": "Ферганская звезда подготовки к университету",
+            "type": "COURSE_CENTER",
+            "phone": "+998735556622",
+            "website": "https://fergana-uniprepstar-example.uz",
+            "telegram": "https://t.me/ferganauniprepstar_example",
+            "city": "Fergana",
+            "deliveryMode": "OFFLINE",
+            "foundedYear": 2018,
+            "studentCount": 140,
+            "teacherCount": 9,
+            "languages": ["uz", "ru"],
+            "programs": ["University Entrance Exam Prep"],
+            "specializations": ["University Entrance Prep"],
+            "categories": ["UNIVERSITY_PREP"],
+            "descriptionSourceText": "Fergana University Prep Star runs year-round intensive courses for national entrance exams."
+          }
+        }
+      ]
+    },
+    "namangan-kids-arts": {
+      "evidence": [
+        {
+          "sourceUrl": "https://namangan-kidsarts-example.uz",
+          "sourceType": "website",
+          "confidence": 0.63,
+          "extractedFields": {
+            "nameUz": "Namangan bolalar san'at markazi",
+            "type": "COURSE_CENTER",
+            "phone": "+998696662233",
+            "website": "https://namangan-kidsarts-example.uz",
+            "instagram": "https://instagram.com/namangankidsarts.example",
+            "city": "Namangan",
+            "deliveryMode": "OFFLINE",
+            "languages": ["uz"],
+            "programs": ["Drawing for Kids", "Music for Kids"],
+            "specializations": ["Kids Development"],
+            "categories": ["KIDS_EDUCATION"],
+            "descriptionSourceText": "Namangan Kids Arts Center offers drawing and music classes for young children."
+          }
+        }
+      ]
+    },
+    "nukus-school-support": {
+      "evidence": [
+        {
+          "sourceUrl": "https://nukus-schoolsupport-example.uz",
+          "sourceType": "website",
+          "confidence": 0.59,
+          "extractedFields": {
+            "nameUz": "Nukus maktab yordam markazi",
+            "type": "TUTORING",
+            "phone": "+998617773344",
+            "website": "https://nukus-schoolsupport-example.uz",
+            "telegram": "https://t.me/nukusschoolsupport_example",
+            "city": "Nukus",
+            "deliveryMode": "OFFLINE",
+            "languages": ["uz", "ru"],
+            "programs": ["Homework Support"],
+            "specializations": ["School Subjects"],
+            "categories": ["SCHOOL_SUBJECTS"],
+            "descriptionSourceText": "Nukus School Support Center helps schoolchildren with homework across subjects."
+          }
+        }
+      ]
+    },
+    "navoiy-english-plus": {
+      "evidence": [
+        {
+          "sourceUrl": "https://navoiy-englishplus-example.uz",
+          "sourceType": "website",
+          "confidence": 0.66,
+          "extractedFields": {
+            "nameUz": "Navoiy ingliz tili plyus",
+            "type": "LANGUAGE_CENTER",
+            "phone": "+998792224466",
+            "website": "https://navoiy-englishplus-example.uz",
+            "city": "Navoiy",
+            "deliveryMode": "OFFLINE",
+            "languages": ["uz", "en"],
+            "programs": ["General English"],
+            "specializations": ["General English"],
+            "categories": ["LANGUAGES"],
+            "descriptionSourceText": "Navoiy English Plus teaches general English to teens and adults."
+          }
+        }
+      ]
+    },
+    "karshi-uniprep-hub": {
+      "evidence": [
+        {
+          "sourceUrl": "https://karshi-uniprephub-example.uz",
+          "sourceType": "website",
+          "confidence": 0.73,
+          "extractedFields": {
+            "nameUz": "Qarshi universitetga tayyorlov markazi",
+            "type": "COURSE_CENTER",
+            "phone": "+998753335577",
+            "website": "https://karshi-uniprephub-example.uz",
+            "telegram": "https://t.me/karshiuniprephub_example",
+            "city": "Karshi",
+            "deliveryMode": "OFFLINE",
+            "foundedYear": 2019,
+            "studentCount": 120,
+            "teacherCount": 8,
+            "languages": ["uz"],
+            "programs": ["University Entrance Exam Prep"],
+            "specializations": ["University Entrance Prep"],
+            "categories": ["UNIVERSITY_PREP"],
+            "descriptionSourceText": "Karshi University Prep Hub prepares graduates for national entrance exams."
+          }
+        }
+      ]
+    },
+    "termez-kids-stem": {
+      "evidence": [
+        {
+          "sourceUrl": "https://termez-kidsstem-example.uz",
+          "sourceType": "website",
+          "confidence": 0.61,
+          "extractedFields": {
+            "nameUz": "Termiz bolalar STEM studiyasi",
+            "type": "COURSE_CENTER",
+            "phone": "+998764446688",
+            "website": "https://termez-kidsstem-example.uz",
+            "instagram": "https://instagram.com/termezkidsstem.example",
+            "city": "Termez",
+            "deliveryMode": "OFFLINE",
+            "languages": ["uz"],
+            "programs": ["STEM for Kids"],
+            "specializations": ["Kids Development"],
+            "categories": ["KIDS_EDUCATION"],
+            "descriptionSourceText": "Termez Kids STEM Studio runs hands-on science and engineering activities for children."
+          }
+        }
+      ]
+    },
+    "jizzax-ielts-focus": {
+      "evidence": [
+        {
+          "sourceUrl": "https://jizzax-ieltsfocus-example.uz",
+          "sourceType": "website",
+          "confidence": 0.54,
+          "extractedFields": {
+            "nameUz": "Jizzax IELTS fokus",
+            "type": "LANGUAGE_CENTER",
+            "phone": "+998725557799",
+            "website": "https://jizzax-ieltsfocus-example.uz",
+            "telegram": "https://t.me/jizzaxieltsfocus_example",
+            "city": "Jizzax",
+            "deliveryMode": "OFFLINE",
+            "languages": ["uz"],
+            "programs": ["IELTS Preparation"],
+            "specializations": ["IELTS"],
+            "categories": ["LANGUAGES", "IELTS"],
+            "descriptionSourceText": "Jizzax IELTS Focus offers exam-focused IELTS preparation classes."
+          }
+        }
+      ]
+    },
+    "gulistan-school-subjects-pro": {
+      "evidence": [
+        {
+          "sourceUrl": "https://gulistan-schoolsubjectspro-example.uz",
+          "sourceType": "website",
+          "confidence": 0.65,
+          "extractedFields": {
+            "nameUz": "Guliston fanlar pro markazi",
+            "type": "TUTORING",
+            "phone": "+998676668811",
+            "website": "https://gulistan-schoolsubjectspro-example.uz",
+            "city": "Gulistan",
+            "deliveryMode": "OFFLINE",
+            "languages": ["uz", "ru"],
+            "programs": ["Mathematics", "Physics"],
+            "specializations": ["School Subjects"],
+            "categories": ["SCHOOL_SUBJECTS"],
+            "descriptionSourceText": "Gulistan School Subjects Pro tutors students in mathematics and physics for grades 6-11."
+          }
+        }
+      ]
+    },
+    "urgench-kids-creative": {
+      "evidence": [
+        {
+          "sourceUrl": "https://urgench-kidscreative-example.uz",
+          "sourceType": "website",
+          "confidence": 0.78,
+          "extractedFields": {
+            "nameUz": "Urganch bolalar ijodiyot studiyasi",
+            "nameRu": "Ургенчская студия детского творчества",
+            "type": "COURSE_CENTER",
+            "phone": "+998627779922",
+            "website": "https://urgench-kidscreative-example.uz",
+            "telegram": "https://t.me/urgenchkidscreative_example",
+            "instagram": "https://instagram.com/urgenchkidscreative.example",
+            "city": "Urgench",
+            "deliveryMode": "OFFLINE",
+            "foundedYear": 2020,
+            "studentCount": 85,
+            "teacherCount": 6,
+            "languages": ["uz"],
+            "programs": ["Creative Arts", "Early Development"],
+            "specializations": ["Kids Development"],
+            "categories": ["KIDS_EDUCATION"],
+            "descriptionSourceText": "Urgench Kids Creative Studio runs creative-arts and early-development programs for young children."
+          }
+        }
+      ]
+    },
+    "tashkent-uniprep-elite": {
+      "evidence": [
+        {
+          "sourceUrl": "https://tashkent-uniprepelite-example.uz",
+          "sourceType": "website",
+          "confidence": 0.9,
+          "extractedFields": {
+            "nameUz": "Toshkent universitetga tayyorlov elita",
+            "nameRu": "Ташкентская элитная подготовка к университету",
+            "type": "COURSE_CENTER",
+            "additionalTypes": ["TUTORING"],
+            "phone": "+998908884455",
+            "website": "https://tashkent-uniprepelite-example.uz",
+            "telegram": "https://t.me/tashkentuniprepelite_example",
+            "city": "Tashkent",
+            "address": "Mirzo Ulug'bek tumani, 4-mavze, Tashkent",
+            "deliveryMode": "HYBRID",
+            "foundedYear": 2014,
+            "studentCount": 410,
+            "teacherCount": 25,
+            "languages": ["uz", "ru", "en"],
+            "programs": ["University Entrance Exam Prep", "SAT Preparation"],
+            "shifts": ["morning", "afternoon", "evening"],
+            "specializations": ["University Entrance Prep"],
+            "categories": ["UNIVERSITY_PREP"],
+            "descriptionSourceText": "Tashkent University Prep Elite offers intensive national-exam and SAT preparation with both in-person and online tracks."
+          }
+        }
+      ]
+    },
+    "samarkand-kids-lab": {
+      "evidence": [
+        {
+          "sourceUrl": "https://samarkand-kidslab-example.uz",
+          "sourceType": "website",
+          "confidence": 0.67,
+          "extractedFields": {
+            "nameUz": "Samarqand bolalar kashfiyot laboratoriyasi",
+            "type": "COURSE_CENTER",
+            "phone": "+998669992244",
+            "website": "https://samarkand-kidslab-example.uz",
+            "instagram": "https://instagram.com/samarkandkidslab.example",
+            "city": "Samarkand",
+            "deliveryMode": "OFFLINE",
+            "languages": ["uz"],
+            "programs": ["STEM for Kids"],
+            "specializations": ["Kids Development"],
+            "categories": ["KIDS_EDUCATION"],
+            "descriptionSourceText": "Samarkand Kids Discovery Lab offers STEM activities for children aged 6-11."
+          }
+        }
+      ]
+    },
+    "bukhara-english-bridge": {
+      "evidence": [
+        {
+          "sourceUrl": "https://bukhara-englishbridge-example.uz",
+          "sourceType": "website",
+          "confidence": 0.75,
+          "extractedFields": {
+            "nameUz": "Buxoro ingliz tili ko'prigi",
+            "type": "LANGUAGE_CENTER",
+            "phone": "+998651113366",
+            "website": "https://bukhara-englishbridge-example.uz",
+            "telegram": "https://t.me/bukharaenglishbridge_example",
+            "city": "Bukhara",
+            "deliveryMode": "OFFLINE",
+            "foundedYear": 2016,
+            "studentCount": 200,
+            "teacherCount": 11,
+            "languages": ["uz", "en"],
+            "programs": ["General English", "IELTS Preparation"],
+            "specializations": ["General English", "IELTS"],
+            "categories": ["LANGUAGES", "IELTS"],
+            "descriptionSourceText": "Bukhara English Bridge teaches general English and IELTS preparation to teens and adults."
+          }
+        }
+      ]
+    },
+    "andijan-ielts-plus": {
+      "evidence": [
+        {
+          "sourceUrl": "https://andijan-ieltsplus-example.uz",
+          "sourceType": "website",
+          "confidence": 0.5,
+          "extractedFields": {
+            "nameUz": "Andijon IELTS plyus",
+            "type": "LANGUAGE_CENTER",
+            "phone": "+998742224477",
+            "website": "https://andijan-ieltsplus-example.uz",
+            "city": "Andijan",
+            "deliveryMode": "OFFLINE",
+            "languages": ["uz"],
+            "programs": ["IELTS Preparation"],
+            "specializations": ["IELTS"],
+            "categories": ["LANGUAGES", "IELTS"],
+            "descriptionSourceText": "Andijan IELTS Plus is a small newly opened IELTS preparation center."
+          }
+        }
+      ]
+    },
+    "fergana-school-support": {
+      "evidence": [
+        {
+          "sourceUrl": "https://fergana-schoolsupport-example.uz",
+          "sourceType": "website",
+          "confidence": 0.62,
+          "extractedFields": {
+            "nameUz": "Farg'ona maktab yordam markazi",
+            "type": "TUTORING",
+            "phone": "+998733335588",
+            "website": "https://fergana-schoolsupport-example.uz",
+            "telegram": "https://t.me/ferganaschoolsupport_example",
+            "city": "Fergana",
+            "deliveryMode": "OFFLINE",
+            "languages": ["uz", "ru"],
+            "programs": ["Homework Support", "Exam Prep"],
+            "specializations": ["School Subjects"],
+            "categories": ["SCHOOL_SUBJECTS"],
+            "descriptionSourceText": "Fergana School Support Center helps schoolchildren with homework and exam preparation."
+          }
+        }
+      ]
+    },
+    "namangan-uniprep-gate": {
+      "evidence": [
+        {
+          "sourceUrl": "https://namangan-uniprepgate-example.uz",
+          "sourceType": "website",
+          "confidence": 0.7,
+          "extractedFields": {
+            "nameUz": "Namangan universitetga tayyorlov darvozasi",
+            "type": "COURSE_CENTER",
+            "phone": "+998694446699",
+            "website": "https://namangan-uniprepgate-example.uz",
+            "instagram": "https://instagram.com/namanganuniprepgate.example",
+            "city": "Namangan",
+            "deliveryMode": "OFFLINE",
+            "foundedYear": 2018,
+            "studentCount": 100,
+            "teacherCount": 7,
+            "languages": ["uz"],
+            "programs": ["University Entrance Exam Prep"],
+            "specializations": ["University Entrance Prep"],
+            "categories": ["UNIVERSITY_PREP"],
+            "descriptionSourceText": "Namangan University Prep Gate prepares students for national entrance exams."
           }
         }
       ]

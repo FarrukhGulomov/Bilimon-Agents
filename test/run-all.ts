@@ -1,10 +1,18 @@
 /**
  * Minimal plain-node/tsx test runner (no test framework). Asserts:
- *  - slug generation is deterministic
+ *  - slug generation is deterministic, and matches the real BilimOn export's
+ *    own slug convention for two real examples (King's Academy, Najot Ta'lim)
  *  - phone normalization rejects malformed numbers
  *  - dedupe collapses the known Cambridge duplicate pair
  *  - validator rejects an unknown enum value
- *  - location-mapper resolves Tashkent/Toshkent/Ташкент to the same cityId
+ *  - validator accepts the real (cityId:null, regionId:null) location case
+ *  - validator accepts the real pricing shape and rejects the old
+ *    placeholder pricing shape
+ *  - location-mapper resolves Tashkent/Toshkent/Ташкент to the same real cityId
+ *  - location-mapper does NOT invent an id for a city outside the real
+ *    reference export's 8-region coverage (e.g. Nukus/Qoraqalpog'iston)
+ *  - runWithConcurrency caps in-flight work at `limit` and preserves order
+ *  - llm-client's token usage accumulator sums input/output tokens per call
  *
  * Run with: npm test  (== tsx test/run-all.ts)
  */
@@ -12,7 +20,13 @@ import { slugify, normalizePhone, generateId, normalizeNameKey } from "../src/se
 import { resolveCity } from "../src/services/location-mapper.js";
 import { deterministicDedupe } from "../src/services/deduplicator.js";
 import { validateRecord } from "../src/services/validator.js";
+import { BilimOnExportRecordZ } from "../src/schemas/bilimon-export.zod.js";
+import { runWithConcurrency } from "../src/services/concurrency.js";
+import { getTokenUsage, resetTokenUsage, recordUsage } from "../src/services/llm-client.js";
 import type { BilimOnExportRecord } from "../src/types/index.js";
+
+const REAL_TASHKENT_CITY_ID = "cmrfw8t3y000fn3og703hdh1a";
+const REAL_TASHKENT_REGION_ID = "cmrfw8t2z0000n3ogoka95589";
 
 let pass = 0;
 let fail = 0;
@@ -36,6 +50,17 @@ console.log("1. Slug generation is deterministic");
   const id1 = generateId(normalizeNameKey("Cambridge Learning Center"), "Tashkent");
   const id2 = generateId(normalizeNameKey("Cambridge Learning Center"), "Tashkent");
   assert(id1 === id2, "generateId() is deterministic given the same name+city");
+  assert(
+    id1.startsWith("pipeline-") && !/^c[a-z0-9]{24}$/.test(id1),
+    "generateId() uses a clearly-prefixed pipeline-internal scheme, never a cuid-lookalike"
+  );
+
+  // Two real examples from data/reference/bilimon-institutions-reference.json:
+  // confirm our slug generator matches BilimOn's own real slug convention.
+  const kingsSlug = slugify("King's Academy");
+  assert(kingsSlug === "kings-academy", `"King's Academy" slugifies to the real convention (got "${kingsSlug}")`);
+  const najotSlug = slugify("Najot Ta'lim");
+  assert(najotSlug === "najot-talim", `"Najot Ta'lim" slugifies to the real convention (got "${najotSlug}")`);
 }
 
 console.log("2. Phone normalization rejects malformed numbers");
@@ -110,8 +135,8 @@ console.log("4. Validator rejects an unknown enum value");
     website: null,
     telegram: null,
     instagram: null,
-    cityId: 1,
-    regionId: 1,
+    cityId: REAL_TASHKENT_CITY_ID,
+    regionId: REAL_TASHKENT_REGION_ID,
     address: "Test address",
     lat: null,
     lng: null,
@@ -124,7 +149,7 @@ console.log("4. Validator rejects an unknown enum value");
       foundedYear: null,
       studentCount: null,
       teacherCount: null,
-      languages: ["UZ"],
+      languages: ["uz"],
       programs: [],
       shifts: [],
       specializations: [],
@@ -146,9 +171,34 @@ console.log("4. Validator rejects an unknown enum value");
     "rejection reasons mention the offending `type` field"
   );
 
-  const badCity = { ...base, cityId: 99999 };
+  const badCity = { ...base, cityId: "not-a-real-cuid" };
   const badCityResult = validateRecord(badCity);
   assert(!badCityResult.valid, "a record with an unknown cityId is rejected");
+
+  // Real schema case: cityId:null AND regionId:null is legal (3/302 real
+  // records — "fully unknown location"), not a validation failure.
+  const fullyUnknownLocation = { ...base, cityId: null, regionId: null };
+  const fullyUnknownResult = validateRecord(fullyUnknownLocation);
+  assert(
+    fullyUnknownResult.valid,
+    `cityId:null + regionId:null is accepted as legal per the real schema (reasons: ${fullyUnknownResult.reasons.join(", ")})`
+  );
+
+  // Real pricing shape (monthlyMin/monthlyMax/paymentMethods) is accepted...
+  const realPricing = {
+    ...base,
+    pricing: { monthlyMin: 500000, monthlyMax: 1200000, paymentMethods: ["Payme", "Click"] },
+  };
+  const realPricingParsed = BilimOnExportRecordZ.safeParse(realPricing);
+  assert(realPricingParsed.success, "the real pricing shape {monthlyMin, monthlyMax, paymentMethods} parses successfully");
+
+  // ...while the OLD placeholder pricing shape ({min,max,currency,notes}) is rejected.
+  const placeholderPricing = {
+    ...base,
+    pricing: { min: 500000, max: 1200000, currency: "UZS", notes: null },
+  };
+  const placeholderPricingParsed = BilimOnExportRecordZ.safeParse(placeholderPricing);
+  assert(!placeholderPricingParsed.success, "the old placeholder pricing shape {min,max,currency,notes} is rejected");
 }
 
 console.log("5. Location-mapper resolves Tashkent/Toshkent/Ташкент to the same cityId");
@@ -163,6 +213,80 @@ console.log("5. Location-mapper resolves Tashkent/Toshkent/Ташкент to the
   );
   const unknown = resolveCity("Nonexistentburg");
   assert(unknown === null, "an unrecognized city name resolves to null rather than guessing");
+
+  // Real coverage gap: the 302-record reference export has zero institutions
+  // in Nukus/Qoraqalpog'iston (and Navoiy, Termez, Guliston, Urganch) — these
+  // must NOT resolve to a fabricated id; the exporter routes them to
+  // NEEDS_REVIEW instead (see agents/bilimon-exporter.ts).
+  const nukus = resolveCity("Nukus");
+  assert(nukus === null, "Nukus/Qoraqalpog'iston (not in the real reference export) resolves to null, not a fabricated id");
+  const termez = resolveCity("Termez");
+  assert(termez === null, "Termez/Surxondaryo (not in the real reference export) resolves to null, not a fabricated id");
+}
+
+console.log("6. runWithConcurrency caps in-flight work and preserves per-item results");
+{
+  await (async () => {
+    const limit = 3;
+    let inFlight = 0;
+    let maxObservedInFlight = 0;
+    const items = Array.from({ length: 12 }, (_, i) => i);
+    const results = await runWithConcurrency({
+      items,
+      limit,
+      worker: async (item) => {
+        inFlight++;
+        maxObservedInFlight = Math.max(maxObservedInFlight, inFlight);
+        // Yield control so other queued workers actually get a chance to
+        // start concurrently (otherwise a synchronous worker would never
+        // let concurrency exceed 1 regardless of `limit`).
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        inFlight--;
+        return item * 2;
+      },
+    });
+    assert(maxObservedInFlight <= limit, `never more than ${limit} items in flight (observed ${maxObservedInFlight})`);
+    assert(maxObservedInFlight === limit, `concurrency actually reaches the configured limit (observed ${maxObservedInFlight})`);
+    assert(
+      results.every((r, i) => r === items[i] * 2),
+      "results[i] corresponds to items[i] regardless of completion order"
+    );
+
+    let settledCount = 0;
+    await runWithConcurrency({
+      items: [1, 2, 3],
+      limit: 10, // limit larger than items.length should not throw or hang
+      worker: async (item) => item,
+      onSettled: () => settledCount++,
+    });
+    assert(settledCount === 3, "onSettled fires once per item even when limit exceeds item count");
+
+    const emptyResults = await runWithConcurrency({ items: [], limit: 5, worker: async (x) => x });
+    assert(emptyResults.length === 0, "an empty items array resolves immediately with an empty result array");
+  })();
+}
+
+console.log("7. llm-client token usage accumulator sums input/output tokens across calls");
+{
+  resetTokenUsage();
+  assert(
+    JSON.stringify(getTokenUsage()) === JSON.stringify({ inputTokens: 0, outputTokens: 0, calls: 0 }),
+    "resetTokenUsage() zeroes the running total"
+  );
+  recordUsage({ input_tokens: 120, output_tokens: 40 });
+  recordUsage({ input_tokens: 80, output_tokens: 20 });
+  const usage = getTokenUsage();
+  assert(usage.inputTokens === 200, `input tokens accumulate across calls (got ${usage.inputTokens})`);
+  assert(usage.outputTokens === 60, `output tokens accumulate across calls (got ${usage.outputTokens})`);
+  assert(usage.calls === 2, `call count increments once per recorded response (got ${usage.calls})`);
+  recordUsage(null); // a response with no usage info (e.g. an error path) must not throw or double-count
+  recordUsage(undefined);
+  const afterMissing = getTokenUsage();
+  assert(
+    afterMissing.inputTokens === 200 && afterMissing.outputTokens === 60 && afterMissing.calls === 2,
+    "recordUsage(null/undefined) is a safe no-op"
+  );
+  resetTokenUsage(); // leave global state clean for anything that runs after this test file
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

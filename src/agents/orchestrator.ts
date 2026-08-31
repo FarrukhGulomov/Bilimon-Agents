@@ -17,6 +17,8 @@ import { buildExportRecord, exportFinalArtifacts, writeProcessedRecord } from ".
 import { scoreInstitution } from "../services/scoring.js";
 import { validateRecord } from "../services/validator.js";
 import { generateId, normalizeNameKey, slugify } from "../services/normalizer.js";
+import { runWithConcurrency } from "../services/concurrency.js";
+import { loadExecutionConfig } from "../services/execution-config.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATE_DIR = join(__dirname, "..", "..", "data", "state");
@@ -89,9 +91,23 @@ function isPastStage(state: PipelineState, stage: PipelineState): boolean {
   return stageRank(state) >= stageRank(stage);
 }
 
+export interface ProgressSnapshot {
+  completed: number;
+  total: number;
+  approved: number;
+  needsReview: number;
+  rejected: number;
+  duplicates: number;
+}
+
 export interface RunOptions {
   count: number;
   mock: boolean;
+  /** Called after each institution finishes the RESEARCHING..gate pipeline
+   * (and every time an already-terminal one is skipped), so a caller (the
+   * CLI) can print a running progress line during a long batch. Optional —
+   * defaults to a no-op so callers/tests that don't care can ignore it. */
+  onProgress?: (snapshot: ProgressSnapshot) => void;
 }
 
 export interface RunSummary {
@@ -101,6 +117,8 @@ export interface RunSummary {
   needsReview: number;
   rejected: number;
 }
+
+type CandidateOutcome = "approved" | "needsReview" | "rejected" | "retry-pending";
 
 /** Runs deterministic dedupe over raw discovery candidates and returns
  * canonical survivors plus a map id -> merged-away duplicate ids. */
@@ -148,20 +166,25 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
   let approved = 0;
   let needsReview = 0;
   let rejectedCount = 0;
+  const duplicatesSoFar = mergedAwayIds.size;
 
-  for (const cand of survivors) {
+  /** Runs one candidate through RESEARCHING -> ... -> quality gate. Mutates
+   * per-institution state on disk exactly as the original sequential loop
+   * did; returns only the terminal-outcome tag so the caller can update
+   * shared counters and progress after each candidate settles. Candidates
+   * are otherwise independent (separate state/processed/review files), so
+   * this is safe to run several at a time via runWithConcurrency below. */
+  async function processCandidate(cand: DiscoveryCandidate): Promise<CandidateOutcome> {
     const nameKey = normalizeNameKey(cand.rawName);
     const id = generateId(nameKey, cand.city ?? "");
     const slug = slugify(cand.rawName, cand.city ?? "");
-    let state = getOrCreateState(id);
-    processedIds.push(id);
+    const state = getOrCreateState(id);
 
     if (state.state === "NEEDS_REVIEW" || state.state === "REJECTED" || state.state === "APPROVED") {
       // Already terminal from a prior run — idempotent skip, no reprocessing.
-      if (state.state === "NEEDS_REVIEW") needsReview++;
-      else if (state.state === "REJECTED") rejectedCount++;
-      else approved++;
-      continue;
+      if (state.state === "NEEDS_REVIEW") return "needsReview";
+      if (state.state === "REJECTED") return "rejected";
+      return "approved";
     }
 
     try {
@@ -200,8 +223,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
         );
         state.lastError = built.buildErrors.join("; ");
         transition(state, "NEEDS_REVIEW", "failed to build export record");
-        needsReview++;
-        continue;
+        return "needsReview";
       }
       writeProcessedRecord(id, built.record);
       transition(state, "JSON_READY");
@@ -224,8 +246,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
           "utf-8"
         );
         transition(state, "REJECTED", `quality score ${score.qualityScore}`);
-        rejectedCount++;
-        continue;
+        return "rejected";
       }
 
       const validation = validateRecord(built.record);
@@ -239,24 +260,56 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
           "utf-8"
         );
         transition(state, "NEEDS_REVIEW", reasons.join("; "));
-        needsReview++;
-        continue;
+        return "needsReview";
       }
 
       // score.status is APPROVED or APPROVED_WITH_WARNINGS, and validation passed.
       transition(state, "APPROVED", `quality score ${score.qualityScore} (${score.status})`);
-      approved++;
+      return "approved";
     } catch (err) {
       state.retryCount = (state.retryCount ?? 0) + 1;
       state.lastError = (err as Error).message;
       if (state.retryCount >= MAX_RETRIES) {
         transition(state, "REJECTED", `exceeded max retries (${MAX_RETRIES}): ${state.lastError}`);
-        rejectedCount++;
-      } else {
-        writeState(state); // stay in current state, retry on next run
+        return "rejected";
       }
+      writeState(state); // stay in current state, retry on next run
+      return "retry-pending";
     }
   }
+
+  for (const cand of survivors) {
+    const id = generateId(normalizeNameKey(cand.rawName), cand.city ?? "");
+    processedIds.push(id);
+  }
+
+  const { maxConcurrency, progressReportEvery } = loadExecutionConfig();
+  let completed = 0;
+  const onProgress = opts.onProgress ?? (() => {});
+
+  await runWithConcurrency({
+    items: survivors,
+    limit: maxConcurrency,
+    worker: processCandidate,
+    onSettled: (outcome) => {
+      if (outcome === "approved") approved++;
+      else if (outcome === "needsReview") needsReview++;
+      else if (outcome === "rejected") rejectedCount++;
+      // "retry-pending" contributes to none of the terminal counters yet.
+      completed++;
+      const isLast = completed === survivors.length;
+      if (isLast || completed % progressReportEvery === 0) {
+        onProgress({
+          completed,
+          total: survivors.length,
+          approved,
+          needsReview,
+          rejected: rejectedCount,
+          duplicates: duplicatesSoFar,
+        });
+      }
+    },
+  });
 
   return {
     processedIds,
