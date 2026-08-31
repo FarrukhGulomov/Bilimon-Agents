@@ -60,9 +60,16 @@ export function buildExportRecord(
     buildErrors.push(`could not resolve city "${fields.city ?? "(missing)"}" — city not present in known BilimOn reference data — real cityId/regionId unconfirmed`);
   }
 
+  // Real BilimOn data: phone is null in 259/302 (86%) of actual records —
+  // a missing phone is NOT invalid, it's the common case, and must not
+  // block export. Only a phone that WAS supplied but doesn't parse as a
+  // real Uzbekistan number is a build error; missing entirely just
+  // resolves to null. (Real production bug: this used to hard-fail every
+  // candidate with no discoverable phone number, which is most of them.)
+  const phoneProvided = !!fields.phone?.trim();
   const phoneRes = normalizePhone(fields.phone);
-  if (!phoneRes.valid) {
-    buildErrors.push(`invalid/missing phone: ${phoneRes.reason}`);
+  if (phoneProvided && !phoneRes.valid) {
+    buildErrors.push(`invalid phone "${fields.phone}": ${phoneRes.reason}`);
   }
   // Real BilimOn phone2 values sometimes hold multiple comma-separated
   // numbers in one string (e.g. "+998909007966,+998944130900"). Normalize
@@ -90,7 +97,7 @@ export function buildExportRecord(
     type: fields.type ?? "COURSE_CENTER",
     additionalTypes: fields.additionalTypes ?? [],
     status: "PENDING",
-    phone: phoneRes.normalized!,
+    phone: phoneRes.valid ? phoneRes.normalized! : null,
     // Multi-number strings (e.g. "+998909007966,+998944130900") pass through
     // as-is rather than being rejected; a single number is normalized when
     // it validates, otherwise passed through raw rather than dropped.

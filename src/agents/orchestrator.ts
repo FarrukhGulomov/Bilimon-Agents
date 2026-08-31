@@ -217,6 +217,14 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
         : await researchLive(id, nameKey, [cand.sourceUrl].filter(Boolean) as string[]);
       const { fields, evidenceCount, bestSourceConfidence } = mergeEvidence(researchRecord);
       // Fill in city/category from discovery if research didn't supply them.
+      // Real production bug: researchLive's extraction prompt never asks for
+      // a name field at all, so a candidate whose research pass found no
+      // other evidence had fields.nameUz/nameLatin both empty and got
+      // rejected with "no nameUz/nameLatin available" — even though the
+      // institution's name (cand.rawName, from the discovery web-search
+      // result title) was known the whole time and already used for this
+      // candidate's id/slug. Always fall back to it.
+      if (!fields.nameUz && !fields.nameLatin && cand.rawName) fields.nameLatin = cand.rawName;
       if (!fields.city && cand.city) fields.city = cand.city;
       if ((!fields.categories || fields.categories.length === 0) && cand.category) {
         // category comes from discovery as a plain string matching the enum name.
