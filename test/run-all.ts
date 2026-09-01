@@ -449,6 +449,24 @@ console.log("9c. buildExportRecord: a genuinely missing phone is legal (real dat
   assert(goodPhone.record?.phone === "+998712000004", "a valid supplied phone is still normalized and kept");
 }
 
+console.log("9d. buildExportRecord normalizes a bare-domain website instead of rejecting it downstream");
+{
+  // Real production bug: a website like "mathuz.uz" (no scheme, exactly
+  // what an extraction from a search snippet commonly yields) was passed
+  // straight through un-normalized and failed the export schema's strict
+  // https?:// URL check later — even though normalizeUrl() (already used
+  // elsewhere for dedupe) exists specifically to add the missing scheme.
+  const baseFields = { nameLatin: "MathUz", city: "Tashkent" };
+  const baseContent = { descriptionUz: null, descriptionRu: null, needsContentReview: false };
+
+  const bareDomain = buildExportRecord("id4", "slug", "namekey", { ...baseFields, website: "mathuz.uz" }, baseContent);
+  assert(bareDomain.record !== null, `a bare-domain website still builds successfully (errors: ${JSON.stringify(bareDomain.buildErrors)})`);
+  assert(bareDomain.record?.website === "https://mathuz.uz", `the website is normalized to a full URL (got ${bareDomain.record?.website})`);
+
+  const alreadyFull = buildExportRecord("id5", "slug", "namekey", { ...baseFields, website: "https://mathuz.uz/" }, baseContent);
+  assert(alreadyFull.record?.website === "https://mathuz.uz", "an already-full URL is kept (trailing slash stripped) rather than double-prefixed");
+}
+
 console.log("9. --mock discovery filters/prioritizes fixtures by the resolved DiscoveryScope");
 {
   const all40 = discoverMock(40, loadDefaultScope());
