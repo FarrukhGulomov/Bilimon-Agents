@@ -38,7 +38,7 @@ import {
   type Category,
   type InstitutionType,
 } from "../schemas/enums.js";
-import { askStructured } from "./llm-client.js";
+import { askStructured, hasApiKey } from "./llm-client.js";
 import { listCities } from "./location-mapper.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -281,7 +281,7 @@ export async function resolveBrief(brief: string | undefined | null): Promise<Di
   }
 
   let scope: DiscoveryScope;
-  if (process.env.OPENAI_API_KEY) {
+  if (hasApiKey()) {
     try {
       scope = await resolveBriefWithLlm(brief);
     } catch (err) {

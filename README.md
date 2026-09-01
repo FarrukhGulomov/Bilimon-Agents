@@ -274,6 +274,35 @@ PIPELINE_MAX_CONCURRENCY=10 npx tsx src/cli.ts run --count 200
   or drops this tool, the call will surface a clear API error rather than
   silently returning nothing, and there is no separate SERP-API fallback
   wired in.
+- **Provider switch: OpenAI (default) or OpenRouter.** Set
+  `SEARCH_PROVIDER=openrouter` (default `openai`) to run every real
+  (non-mock) LLM/web-search call through OpenRouter's OpenAI-compatible
+  Chat Completions API (`https://openrouter.ai/api/v1`) instead — same
+  `askStructured`/`webSearchAndSummarize` call sites in
+  `src/services/llm-client.ts`, just a different `baseURL`/API key/request
+  shape underneath. Useful for testing a specific model or price point via
+  OpenRouter's catalog instead of going directly through OpenAI.
+  - Requires `OPENROUTER_API_KEY` (get one at https://openrouter.ai/keys)
+    and `OPENROUTER_MODEL` — there is **no hardcoded default model** for
+    this provider, since the whole point is choosing one yourself; browse
+    ids at https://openrouter.ai/models (provider-prefixed, e.g.
+    `openai/gpt-4o-mini`, `google/gemini-2.5-flash`). `getModel()` throws a
+    clear error rather than silently falling back to an OpenAI model id if
+    `OPENROUTER_MODEL` is unset while `SEARCH_PROVIDER=openrouter`.
+  - Live web search on this path uses OpenRouter's documented `web` plugin
+    (`plugins: [{id: "web"}]` on the chat completion request — confirmed
+    against an actual `openrouter.ai/docs` page at the time this was
+    written). OpenRouter's own docs note a newer `openrouter:web_search`
+    server tool is meant to eventually supersede this plugin; if `plugins`
+    stops working in the future, that is the mechanism to migrate to.
+  - Not exercised against the live OpenRouter API in this build environment
+    (no network/API key here) for the same reason the OpenAI path isn't —
+    structurally complete, verify with a small real run
+    (`pipeline run --count 1 --brief "..."`) before trusting it at scale.
+  - `hasApiKey()`/`MissingApiKeyError` are provider-aware — they check
+    whichever key the active `SEARCH_PROVIDER` needs, so error messages and
+    the mock-vs-real gate in `cli.ts` stay correct regardless of which
+    provider is selected.
 
 Run the unit tests with `npm test` (plain tsx script, no framework):
 
