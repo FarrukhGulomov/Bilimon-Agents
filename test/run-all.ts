@@ -22,7 +22,7 @@ import { deterministicDedupe } from "../src/services/deduplicator.js";
 import { validateRecord } from "../src/services/validator.js";
 import { BilimOnExportRecordZ } from "../src/schemas/bilimon-export.zod.js";
 import { runWithConcurrency } from "../src/services/concurrency.js";
-import { getTokenUsage, resetTokenUsage, recordUsage, coerceToResultArray } from "../src/services/llm-client.js";
+import { getTokenUsage, resetTokenUsage, recordUsage, coerceToResultArray, getProvider, getModel, hasApiKey } from "../src/services/llm-client.js";
 import { resolveBriefHeuristic, loadDefaultScope, resolveBrief } from "../src/services/brief-parser.js";
 import { discoverMock } from "../src/agents/discovery.js";
 import { buildExportRecord } from "../src/agents/bilimon-exporter.js";
@@ -426,6 +426,49 @@ console.log("9b. resolveBrief() applies city-name detection unconditionally, not
   } finally {
     if (savedKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = savedKey;
+  }
+}
+
+console.log("9e. SEARCH_PROVIDER switch: openai (default) vs openrouter, and hasApiKey() is provider-aware");
+{
+  const saved = {
+    SEARCH_PROVIDER: process.env.SEARCH_PROVIDER,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+    OPENROUTER_MODEL: process.env.OPENROUTER_MODEL,
+  };
+  try {
+    delete process.env.SEARCH_PROVIDER;
+    assert(getProvider() === "openai", 'getProvider() defaults to "openai" when SEARCH_PROVIDER is unset');
+
+    process.env.SEARCH_PROVIDER = "openrouter";
+    assert(getProvider() === "openrouter", "getProvider() respects SEARCH_PROVIDER=openrouter");
+
+    delete process.env.OPENROUTER_MODEL;
+    let threw = false;
+    try {
+      getModel();
+    } catch {
+      threw = true;
+    }
+    assert(threw, "getModel() throws a clear error when SEARCH_PROVIDER=openrouter but OPENROUTER_MODEL is unset (no silent fallback to an OpenAI model id)");
+
+    process.env.OPENROUTER_MODEL = "openai/gpt-4o-mini";
+    assert(getModel() === "openai/gpt-4o-mini", "getModel() returns OPENROUTER_MODEL verbatim once set");
+
+    delete process.env.OPENROUTER_API_KEY;
+    assert(hasApiKey() === false, "hasApiKey() checks OPENROUTER_API_KEY (not OPENAI_API_KEY) when the provider is openrouter");
+    process.env.OPENROUTER_API_KEY = "sk-or-test";
+    assert(hasApiKey() === true, "hasApiKey() becomes true once OPENROUTER_API_KEY is set for the openrouter provider");
+
+    process.env.SEARCH_PROVIDER = "openai";
+    delete process.env.OPENAI_API_KEY;
+    assert(hasApiKey() === false, "switching back to openai, hasApiKey() checks OPENAI_API_KEY again, ignoring any OPENROUTER_API_KEY");
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 }
 

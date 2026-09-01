@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import { runPipeline, finalizeExport } from "./agents/orchestrator.js";
 import { validateBatch } from "./services/validator.js";
 import type { BilimOnExportRecord } from "./types/index.js";
-import { MissingApiKeyError } from "./services/llm-client.js";
+import { MissingApiKeyError, hasApiKey } from "./services/llm-client.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXPORT_DIR = join(__dirname, "..", "data", "export");
@@ -48,7 +48,7 @@ async function cmdRun(flags: Record<string, string | boolean>) {
   const count = Number(flags.count ?? 5);
   const mock = isMock(flags);
   const brief = typeof flags.brief === "string" ? flags.brief : undefined;
-  if (!mock && !process.env.OPENAI_API_KEY) {
+  if (!mock && !hasApiKey()) {
     console.error(new MissingApiKeyError().message);
     process.exitCode = 1;
     return;
