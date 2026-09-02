@@ -18,6 +18,7 @@ import type {
 import type { ContentResult } from "./content-manager.js";
 import { resolveCity } from "../services/location-mapper.js";
 import { normalizePhone, normalizeUrl, normalizeLanguages } from "../services/normalizer.js";
+import { detectNonEducationalOrg } from "../services/relevance-filter.js";
 import { getTokenUsage } from "../services/llm-client.js";
 import { readLastScope } from "../services/scope-store.js";
 
@@ -83,6 +84,16 @@ export function buildExportRecord(
 
   if (!fields.nameUz && !fields.nameLatin) {
     buildErrors.push("no nameUz/nameLatin available");
+  }
+
+  // Deterministic backstop: the search prompt already excludes clinics/
+  // hospitals, but a real run still approved "Neo Clinic Tashkent" (a
+  // neurology/pediatrics/EEG clinic) as a KIDS_EDUCATION learning center —
+  // a live web-search model does not reliably follow every prompt
+  // exclusion. See services/relevance-filter.ts for the full story.
+  const nonEducationalReason = detectNonEducationalOrg(fields, content);
+  if (nonEducationalReason) {
+    buildErrors.push(nonEducationalReason);
   }
 
   if (buildErrors.length > 0) {

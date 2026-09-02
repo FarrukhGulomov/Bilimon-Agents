@@ -113,15 +113,35 @@ const TYPE_LABELS: Record<InstitutionType, string> = {
 // asks for SCHOOL/LYCEUM (once that later phase exists and a brief narrows
 // to it) gets the schools-inclusive instructions instead — this is a
 // current-scope narrowing, not a permanent architectural exclusion.
+// Real production risk found on review (not yet an observed failure, but a
+// plausible one): the original wording excluded by LEGAL FORM ("charities,
+// NGOs, foundations"), but many genuine, prominent Uzbekistan learning
+// centers are legally registered as a jamg'arma (foundation) or jamoat
+// tashkiloti (public association/NGO) while still running real paid or
+// free educational courses as their actual activity. Excluding by legal
+// form risks losing real institutions; the exclusion below is written by
+// ACTIVITY instead — an org whose real, observable work is education stays
+// in scope regardless of its legal structure, and only organizations whose
+// real activity is humanitarian aid/child welfare/shelter/medical treatment
+// (not education) are excluded.
+const NON_EDUCATIONAL_ACTIVITY_EXCLUSION =
+  "EXCLUDE organizations whose ACTUAL, PRIMARY ACTIVITY is humanitarian aid, orphan/child " +
+  "welfare care, sheltering, medical treatment/diagnosis, or government administration — " +
+  "regardless of legal form (this applies even if the organization is legally structured as a " +
+  "foundation/jamg'arma or NGO/public association). If an organization's real, observable " +
+  "activity IS delivering paid or free educational courses/classes/lessons, include it even if " +
+  "it happens to be run by a foundation or NGO — many genuine Uzbekistan learning centers are " +
+  "legally structured that way. Do not exclude based on the words \"foundation\", \"jamg'arma\", " +
+  "or \"NGO\" alone.";
+
 export function buildScopeInstruction(type: string | undefined): string {
   if (type === "SCHOOL" || type === "LYCEUM") {
     return (
       "ONLY include organizations that actually deliver paid or structured educational " +
       "courses/classes/lessons to students (schools, lyceums, and other K-12 institutions). " +
-      "EXCLUDE charities, NGOs, foundations, orphanages, shelters, social-care or humanitarian " +
-      "organizations, government agencies, and hospitals/clinics, even if their name or " +
-      "description mentions children, education, or development — those are not learning " +
-      "institutions for this purpose."
+      NON_EDUCATIONAL_ACTIVITY_EXCLUSION +
+      " Also exclude hospitals/clinics even if their name or description mentions children, " +
+      "education, or development — those are not learning institutions for this purpose."
     );
   }
   return (
@@ -134,10 +154,10 @@ export function buildScopeInstruction(type: string | undefined): string {
     "English-language, foundation-year, or exam-prep courses, the university itself is out of " +
     "scope for now (a separate universities/institutes product phase is planned later); " +
     "(2) full K-12 schools and lyceums (also a separate later phase); " +
-    "(3) charities, NGOs, foundations, orphanages, shelters, social-care or humanitarian " +
-    "organizations, government agencies, and hospitals/clinics, even if their name or " +
-    "description mentions children, education, or development. " +
-    "None of these are learning-center institutions for this purpose."
+    "(3) hospitals/clinics, even if their name or description mentions children, education, or " +
+    "development. " +
+    NON_EDUCATIONAL_ACTIVITY_EXCLUSION +
+    " None of the excluded categories above are learning-center institutions for this purpose."
   );
 }
 

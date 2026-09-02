@@ -61,6 +61,7 @@ import {
 } from "../src/services/scoring.js";
 import type { EvidenceItem, RawExtractedFields } from "../src/types/index.js";
 import { buildExportRecord, exportFinalArtifacts } from "../src/agents/bilimon-exporter.js";
+import { detectNonEducationalOrg } from "../src/services/relevance-filter.js";
 import { resolveExportIdentity } from "../src/agents/orchestrator.js";
 import type { BilimOnExportRecord } from "../src/types/index.js";
 
@@ -540,11 +541,51 @@ console.log("9i. discovery scope excludes full universities/schools by default (
   const defaultScope = buildScopeInstruction(undefined);
   assert(/degree-granting universit/i.test(defaultScope), "the default (no explicit type) instruction excludes degree-granting universities");
   assert(/K-12 schools and lyceums/i.test(defaultScope), "the default instruction also excludes K-12 schools/lyceums");
-  assert(/charit(y|ies)/i.test(defaultScope), "the charity/NGO exclusion from the earlier fix is still present in the default case");
+  assert(/humanitarian aid/i.test(defaultScope), "the non-educational-activity exclusion (successor to the earlier charity/NGO fix) is still present in the default case");
+  assert(
+    /include it even if it happens to be run by a foundation or ngo/i.test(defaultScope),
+    "the exclusion is activity-based, not legal-form-based — a foundation/NGO that actually runs real courses must stay in scope (many genuine Uzbekistan learning centers are legally structured that way)"
+  );
 
   const schoolScope = buildScopeInstruction("SCHOOL");
   assert(/schools, lyceums/i.test(schoolScope), 'an explicit type="SCHOOL" request (a future, brief-narrowed case) is schools-inclusive');
   assert(!/degree-granting universit/i.test(schoolScope), "the schools-inclusive branch doesn't carry the university exclusion wording (it's a different scope, not a superset)");
+}
+
+console.log("9j. relevance-filter catches a medical clinic even though the search prompt already excludes them");
+{
+  // Real production failure: the search prompt explicitly excludes
+  // hospitals/clinics, but a live run still approved "Neo Clinic Tashkent"
+  // (neurology, pediatrics, EEG diagnostics, ABA therapy) as a
+  // KIDS_EDUCATION learning center — the model didn't reliably follow the
+  // prompt's own exclusion for a borderline case. This is the deterministic
+  // backstop.
+  const clinicFields = {
+    nameUz: "Neo Clinic Tashkent",
+    nameRu: "NEO clinic",
+    programs: ["Детский невролог-эпилептолог", "ЭЭГ (Электроэнцефалография)", "Реабилитация"],
+    specializations: ["АВА терапия"],
+  } as any;
+  const reason = detectNonEducationalOrg(clinicFields);
+  assert(reason !== null, "the exact real-world clinic fields are flagged as non-educational");
+
+  const clinicBuilt = buildExportRecord(
+    "idclinic", "slug", "namekey", clinicFields,
+    { descriptionUz: "tavsif", descriptionRu: "описание", needsContentReview: false }
+  );
+  assert(clinicBuilt.record === null, "buildExportRecord refuses to build a record for the clinic (routes to NEEDS_REVIEW, not silently exported)");
+
+  // False-positive guard: a legitimate kids' development center offering
+  // speech therapy / sensory work must NOT be flagged just because
+  // "therapy"-adjacent Uzbek/Russian words appear — only strong,
+  // unambiguous medical-organization terms (clinic, hospital, EEG, named
+  // medical specialties like nevrolog/pediatr) trigger this filter.
+  const legitKidsCenter = {
+    nameUz: "Kids Development Center",
+    programs: ["Nutq terapiyasi", "Sensor integratsiya", "Logopedik mashg'ulotlar"],
+    specializations: ["Erta rivojlanish"],
+  } as any;
+  assert(detectNonEducationalOrg(legitKidsCenter) === null, "a legitimate kids' development/speech-therapy center is NOT flagged");
 }
 
 console.log("9h. bilimon-import.json is wrapped {version, exportedAt, institutions: [...]}, not a bare array");
