@@ -57,15 +57,23 @@ export async function searchInstitutions(
     type ? TYPE_LABELS[type as InstitutionType] : undefined,
   ].filter(Boolean);
   const facetText = facetLabels.length > 0 ? facetLabels.join(" / ") : "ta'lim markazi / образовательный центр / learning center";
-  const query = `${facetText} — ${city}, Uzbekistan. Names, websites, contact info.`;
+  const query =
+    `${facetText} — ${city}, Uzbekistan. Names, phone numbers, addresses, websites. ` +
+    `Check yellowpages.uz and goldenpages.uz (Uzbekistan business directories with structured ` +
+    `listings — name, phone, address, category — for exactly this kind of institution) in ` +
+    `addition to official websites/social pages and general search results.`;
   const results = await webSearchAndSummarize(
     query,
     "You are a discovery agent finding real, currently-operating education institutions " +
       "(language centers, tutoring, schools, exam-prep centers) in Uzbekistan. Most real " +
       "institutions are named and have websites/social pages in Uzbek or Russian, not English " +
       "— actively search in Uzbek and Russian as well as English, and do not skip an institution " +
-      "just because its name or site is not in English. Only report institutions you found " +
-      "genuine evidence for via search — never invent names or URLs."
+      "just because its name or site is not in English. Uzbekistan business directories like " +
+      "yellowpages.uz and goldenpages.uz list many real institutions with structured contact " +
+      "details (phone, address) in one place — check them specifically, not just general search " +
+      "results or official sites, since they often have the phone/address data an institution's " +
+      "own website or social page omits. Only report institutions you found genuine evidence for " +
+      "via search — never invent names, URLs, phone numbers, or addresses."
   );
   // Defense-in-depth: webSearchAndSummarize() already coerces malformed
   // model output to [], but never trust a boundary twice for free.
