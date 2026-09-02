@@ -112,12 +112,43 @@ export interface LiveResearchInput {
  * supplementary source; it is not worth minutes of wall clock per record. */
 const MAX_SCRAPE_URLS = 4;
 
-/** Synthetic, stable provenance key for the search-grounded research item.
- * A synthetic scheme (not a real page URL) is deliberate: appendEvidence
- * dedupes by sourceUrl, so keying this item by one of the pages the model
- * cited would silently suppress the scraped evidence for that same page. */
+/** Synthetic, stable provenance key for the search-grounded research item —
+ * used ONLY as a last-resort fallback when the model cited zero real URLs
+ * (see selectResearchEvidenceSource below). An EvidenceItem always needs
+ * some sourceUrl to satisfy the type and appendEvidence's dedupe-by-sourceUrl
+ * logic. */
 function researchEvidenceUrl(nameKey: string): string {
   return `research://web-search/${encodeURIComponent(nameKey)}`;
+}
+
+/**
+ * Picks the search-grounded evidence item's real sourceUrl.
+ *
+ * Real production bug: the primary web-search research call's evidence item
+ * — where most extracted fields (phone, address, programs, etc.) actually
+ * come from — was ALWAYS recorded under the synthetic
+ * `research://web-search/...` placeholder, even when the same call returned
+ * `research.sourceUrls` (real cited https:// URLs). Those real URLs were
+ * only ever used transiently to seed the separate supplementary scrape pass
+ * — never preserved on the evidence item itself. A human reviewer opening
+ * data/research/<id>.json to answer "where did this phone number come from?"
+ * saw a fake URI instead of the real page(s) the model actually cited.
+ *
+ * Now: when the model cited at least one real URL, the evidence item's
+ * sourceUrl IS that real URL (the first one), with any further cited URLs
+ * preserved in `additionalSourceUrls` rather than discarded — the real
+ * URL(s) stay visible in data/research/<id>.json. Only when the model
+ * genuinely returned zero real cited URLs do we fall back to the synthetic
+ * placeholder. Pure and exported for offline tests.
+ */
+export function selectResearchEvidenceSource(
+  nameKey: string,
+  citedUrls: string[]
+): { sourceUrl: string; additionalSourceUrls?: string[] } {
+  const real = citedUrls.filter((u): u is string => typeof u === "string" && /^https?:\/\//i.test(u));
+  if (real.length === 0) return { sourceUrl: researchEvidenceUrl(nameKey) };
+  const [primary, ...rest] = real;
+  return rest.length > 0 ? { sourceUrl: primary, additionalSourceUrls: rest } : { sourceUrl: primary };
 }
 
 /** Classifies a URL for confidence purposes — see SOURCE_TYPE_BASE in
@@ -238,9 +269,11 @@ export async function researchLive(
         ? research.sourceUrls.filter((u): u is string => typeof u === "string" && /^https?:\/\//i.test(u))
         : [];
       if (Object.keys(fields).length > 0) {
+        const { sourceUrl, additionalSourceUrls } = selectResearchEvidenceSource(nameKey, citedUrls);
         unscored.push({
           fetchedAt: now(),
-          sourceUrl: researchEvidenceUrl(nameKey),
+          sourceUrl,
+          additionalSourceUrls,
           sourceType: "search",
           extractedFields: fields,
           rawTextExcerpt: fields.descriptionSourceText?.slice(0, 500),

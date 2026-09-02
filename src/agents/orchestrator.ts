@@ -16,7 +16,7 @@ import { generateContent } from "./content-manager.js";
 import { buildExportRecord, exportFinalArtifacts, writeProcessedRecord } from "./bilimon-exporter.js";
 import { scoreInstitution } from "../services/scoring.js";
 import { validateRecord } from "../services/validator.js";
-import { generateId, normalizeNameKey, slugify } from "../services/normalizer.js";
+import { generateDuplicateBookkeepingId, generateId, normalizeNameKey, slugify } from "../services/normalizer.js";
 import { runWithConcurrency } from "../services/concurrency.js";
 import { loadExecutionConfig } from "../services/execution-config.js";
 import { resolveBrief, type DiscoveryScope } from "../services/brief-parser.js";
@@ -132,8 +132,10 @@ export interface RunSummary {
 type CandidateOutcome = "approved" | "needsReview" | "rejected" | "retry-pending";
 
 /** Runs deterministic dedupe over raw discovery candidates and returns
- * canonical survivors plus a map id -> merged-away duplicate ids. */
-function dedupeCandidates(candidates: DiscoveryCandidate[]): {
+ * canonical survivors plus a map id -> merged-away duplicate ids. Exported
+ * so the id-collision fix below is testable without spinning up the full
+ * runPipeline(). */
+export function dedupeCandidates(candidates: DiscoveryCandidate[]): {
   survivors: DiscoveryCandidate[];
   mergedAwayIds: Set<string>;
 } {
@@ -205,10 +207,20 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
 
   // Record duplicates in state so report.json can count them, without
   // reprocessing them on subsequent runs.
+  //
+  // Real production bug: this used to key the bookkeeping state entry with
+  // `generateId(normalizeNameKey(cand.rawName), cand.city)` — the SAME id
+  // function processCandidate() uses for the SURVIVING candidate. Two
+  // candidates with identical rawName+city (matched into the same dedupe
+  // group via phone/domain/social, or via name+city itself) produce the
+  // SAME id here and in processCandidate(); the duplicate's REJECTED write
+  // would then make the real survivor's later processCandidate() call see
+  // an already-terminal state and skip it — silently dropping a real
+  // institution. See generateDuplicateBookkeepingId()'s doc comment.
   for (const dupId of mergedAwayIds) {
     const cand = candidates.find((c) => c.discoveryId === dupId);
     if (!cand) continue;
-    const provisionalId = generateId(normalizeNameKey(cand.rawName), cand.city ?? "");
+    const provisionalId = generateDuplicateBookkeepingId(cand.discoveryId);
     const st = getOrCreateState(provisionalId);
     if (st.state !== "REJECTED") {
       st.lastError = "duplicate";

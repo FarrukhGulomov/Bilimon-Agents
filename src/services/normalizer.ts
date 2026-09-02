@@ -65,6 +65,38 @@ export function generateId(nameKey: string, city: string): string {
   return `pipeline-${base}`;
 }
 
+/**
+ * Id used ONLY to bookkeep a discovery result that dedupe merged away — so
+ * report.json can count duplicates and a rerun doesn't reprocess the same
+ * merged-away result. This must NEVER be able to collide with a real
+ * candidate's `generateId(nameKey, city)` id.
+ *
+ * Real production bug: this bookkeeping id used to be
+ * `generateId(normalizeNameKey(cand.rawName), cand.city)` — the EXACT SAME
+ * function `processCandidate()` uses to compute the SURVIVING candidate's
+ * pipeline id. `deterministicDedupe()` groups candidates as duplicates via a
+ * UNION of match keys (normalized name+city, OR phone, OR website domain, OR
+ * telegram/instagram handle) — so two candidates with the IDENTICAL
+ * rawName+city (e.g. found via two different sources) collapse to the same
+ * `generateId()` output whether they matched on the name+city key itself or
+ * on phone/domain/social alone. Whichever candidate the duplicate-bookkeeping
+ * loop processed first wrote REJECTED under that shared id; when the real
+ * surviving candidate was later processed under the SAME id, the existing
+ * idempotency check saw an already-terminal REJECTED state and returned
+ * immediately WITHOUT ever researching/scoring/exporting the real
+ * institution — silently dropping it from every export.
+ *
+ * Keying this off the discovery result's own `discoveryId` (unique per
+ * discovered result, unrelated to name/city) instead makes the collision
+ * structurally impossible: this can never equal `generateId(nameKey, city)`
+ * for any name/city combination, since it never even calls `slugify()` on a
+ * name — and the `dup-` prefix (vs. `generateId`'s `pipeline-` prefix) makes
+ * the two id spaces trivially, visibly distinct on top of that.
+ */
+export function generateDuplicateBookkeepingId(discoveryId: string): string {
+  return `dup-${sha256(discoveryId).slice(0, 24)}`;
+}
+
 /** Deterministic short hash, used for cache filenames and disambiguation suffixes. */
 export function sha256(input: string): string {
   return createHash("sha256").update(input).digest("hex");

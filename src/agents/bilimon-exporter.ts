@@ -21,11 +21,13 @@ import { normalizePhone, normalizeUrl, normalizeLanguages } from "../services/no
 import { detectNonEducationalOrg } from "../services/relevance-filter.js";
 import { getTokenUsage } from "../services/llm-client.js";
 import { readLastScope } from "../services/scope-store.js";
+import { validateBatch } from "../services/validator.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXPORT_DIR = join(__dirname, "..", "..", "data", "export");
 const STATE_DIR = join(__dirname, "..", "..", "data", "state");
 const PROCESSED_DIR = join(__dirname, "..", "..", "data", "processed");
+const REVIEW_DIR = join(__dirname, "..", "..", "data", "review");
 
 export interface BuildRecordResult {
   record: BilimOnExportRecord | null;
@@ -156,7 +158,7 @@ export function buildExportRecord(
 }
 
 function ensureDirs(): void {
-  for (const d of [EXPORT_DIR, PROCESSED_DIR]) {
+  for (const d of [EXPORT_DIR, PROCESSED_DIR, REVIEW_DIR]) {
     if (!existsSync(d)) mkdirSync(d, { recursive: true });
   }
 }
@@ -185,6 +187,7 @@ export function exportFinalArtifacts(): { importPath: string; reportPath: string
   const states = readAllStates();
 
   const approvedRecords: BilimOnExportRecord[] = [];
+  const approvedStates: StateRecord[] = [];
   let completenessSum = 0;
   let confidenceSum = 0;
   let scoredCount = 0;
@@ -206,8 +209,49 @@ export function exportFinalArtifacts(): { importPath: string; reportPath: string
     }
     if (s.state === "APPROVED") {
       const rec = readProcessedRecord(s.id);
-      if (rec) approvedRecords.push(rec);
+      if (rec) {
+        approvedRecords.push(rec);
+        approvedStates.push(s);
+      }
     }
+  }
+
+  // Real production bug: every APPROVED-state record used to be written
+  // straight into bilimon-import.json with no final re-check — even though
+  // validateBatch() (slug uniqueness / duplicate name+city detection) already
+  // existed, but only ran when a human manually invoked `pipeline validate`.
+  // Per-institution state files persist across reruns BY DESIGN (that's what
+  // makes reruns idempotent/resumable), and slug/nameKey collisions can occur
+  // across separate runs discovering the same institution independently
+  // (re-discovered later, or research tipping the quality gate differently
+  // the second time) — nothing stopped two such records from both reaching
+  // APPROVED and both landing in the same exported file. Re-validate the
+  // whole approved batch right before writing: anything that fails is pulled
+  // OUT of the export, written to data/review/<id>.json instead, and its
+  // on-disk state is demoted to NEEDS_REVIEW so a rerun doesn't keep
+  // re-including it — matching the NEEDS_REVIEW routing already used
+  // everywhere else in this pipeline. One bad record never blocks the rest
+  // of the batch from exporting.
+  const batchResults = validateBatch(approvedRecords);
+  const finalApprovedRecords: BilimOnExportRecord[] = [];
+  for (let i = 0; i < approvedRecords.length; i++) {
+    const rec = approvedRecords[i];
+    const st = approvedStates[i];
+    const result = batchResults.get(rec.slug);
+    if (result && result.valid) {
+      finalApprovedRecords.push(rec);
+      continue;
+    }
+    const reasons = result?.reasons ?? ["failed final pre-export batch validation"];
+    writeFileSync(join(REVIEW_DIR, `${st.id}.json`), JSON.stringify({ id: st.id, reasons }, null, 2), "utf-8");
+    const demotedAt = new Date().toISOString();
+    st.state = "NEEDS_REVIEW";
+    st.updatedAt = demotedAt;
+    st.lastError = reasons.join("; ");
+    st.history.push({ state: "NEEDS_REVIEW", at: demotedAt, note: `failed final pre-export batch validation: ${reasons.join("; ")}` });
+    writeFileSync(join(STATE_DIR, `${st.id}.json`), JSON.stringify(st, null, 2), "utf-8");
+    needsReview++;
+    console.log(`NEEDS_REVIEW: ${rec.nameKey} (${st.id}) — failed final pre-export batch validation: ${reasons.join("; ")}`);
   }
 
   // Real production bug: this used to write `approvedRecords` directly as a
@@ -219,7 +263,7 @@ export function exportFinalArtifacts(): { importPath: string; reportPath: string
   const importFile: BilimOnImportFile = {
     version: 1,
     exportedAt: new Date().toISOString(),
-    institutions: approvedRecords,
+    institutions: finalApprovedRecords,
   };
   const importPath = join(EXPORT_DIR, "bilimon-import.json");
   writeFileSync(importPath, JSON.stringify(importFile, null, 2), "utf-8");
@@ -227,7 +271,7 @@ export function exportFinalArtifacts(): { importPath: string; reportPath: string
   const report: ExportReport = {
     totalDiscovered: states.length,
     totalProcessed,
-    approved: approvedRecords.length,
+    approved: finalApprovedRecords.length,
     needsReview,
     rejected,
     duplicates,
