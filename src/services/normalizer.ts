@@ -181,6 +181,33 @@ const LANGUAGE_NAME_TO_CODE: Record<string, string> = {
   // German
   de: "de", ger: "de", german: "de", deutsch: "de", nemis: "de", "nemis tili": "de",
   немецкий: "de", "немецкий язык": "de",
+  // Real production issue: language centers teaching Turkish, Arabic,
+  // Chinese, Korean, Japanese, French, Spanish, Italian, Persian, and Hindi
+  // are common in Uzbekistan (confirmed by real discovered institutions —
+  // e.g. a Turkish-language center whose extraction returned "турецкий"),
+  // but only uz/ru/en/de were mapped, so every one of these hit the export
+  // schema's hard "lowercase 2-3 letter code" requirement and got rejected
+  // outright rather than just soft-flagged as an unconfirmed-but-legal code.
+  tr: "tr", turk: "tr", turkish: "tr", turkcha: "tr", "turk tili": "tr",
+  турецкий: "tr", "турецкий язык": "tr",
+  ar: "ar", arab: "ar", arabic: "ar", arabcha: "ar", "arab tili": "ar",
+  арабский: "ar", "арабский язык": "ar",
+  zh: "zh", chinese: "zh", xitoy: "zh", "xitoy tili": "zh",
+  китайский: "zh", "китайский язык": "zh",
+  ko: "ko", korean: "ko", koreys: "ko", "koreys tili": "ko",
+  корейский: "ko", "корейский язык": "ko",
+  ja: "ja", japanese: "ja", yapon: "ja", "yapon tili": "ja",
+  японский: "ja", "японский язык": "ja",
+  fr: "fr", french: "fr", fransuz: "fr", "fransuz tili": "fr",
+  французский: "fr", "французский язык": "fr",
+  es: "es", spanish: "es", ispan: "es", "ispan tili": "es",
+  испанский: "es", "испанский язык": "es",
+  it: "it", italian: "it", italyan: "it", "italyan tili": "it",
+  итальянский: "it", "итальянский язык": "it",
+  fa: "fa", persian: "fa", farsi: "fa", fors: "fa", "fors tili": "fa",
+  персидский: "fa", "персидский язык": "fa",
+  hi: "hi", hindi: "hi", hind: "hi", "hind tili": "hi",
+  хинди: "hi",
 };
 
 /** Normalize one language label to its code, or null for empty input. */

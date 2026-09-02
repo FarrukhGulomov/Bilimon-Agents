@@ -28,7 +28,7 @@
  * Run with: npm test  (== tsx test/run-all.ts)
  */
 import { readFileSync } from "node:fs";
-import { slugify, normalizePhone, generateId, normalizeNameKey, normalizeLanguages } from "../src/services/normalizer.js";
+import { slugify, normalizePhone, generateId, normalizeNameKey, normalizeLanguages, normalizeLanguageCode } from "../src/services/normalizer.js";
 import { resolveCity } from "../src/services/location-mapper.js";
 import { deterministicDedupe } from "../src/services/deduplicator.js";
 import { validateRecord } from "../src/services/validator.js";
@@ -589,6 +589,20 @@ console.log("9f. languages are normalized to BilimOn ISO codes, not passed throu
   assert(
     JSON.stringify(normalizeLanguages(["Klingon"])) === JSON.stringify(["klingon"]),
     "an unrecognized language is lowercased and kept for the validator to soft-flag, not silently dropped"
+  );
+
+  // Real production failure (Railway, 2026-09-02, second occurrence): a
+  // Turkish-language center's extraction returned details.languages as
+  // ["турецкий"] — not covered by the first fix's uz/ru/en/de map — which
+  // failed the export schema's HARD "lowercase 2-3 letter code" format
+  // check (not just the validator's soft "unconfirmed code" flag) and
+  // blocked export outright. Common languages taught in Uzbekistan beyond
+  // the four in the real reference sample.
+  assert(normalizeLanguageCode("турецкий") === "tr", `Turkish normalizes to "tr" (got "${normalizeLanguageCode("турецкий")}")`);
+  assert(
+    JSON.stringify(normalizeLanguages(["Arab tili", "xitoy tili", "koreys tili", "yapon tili", "fransuz tili"])) ===
+      JSON.stringify(["ar", "zh", "ko", "ja", "fr"]),
+    "Arabic/Chinese/Korean/Japanese/French names (Uzbek spelling) all normalize"
   );
 
   // Mirrors the real failing record: everything else valid, languages in
