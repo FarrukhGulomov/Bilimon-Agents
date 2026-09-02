@@ -145,3 +145,58 @@ export function extractDomain(raw: string | null | undefined): string | null {
     return null;
   }
 }
+
+/**
+ * Maps a free-text language name onto BilimOn's real ISO-style code.
+ *
+ * Real production failure this fixes: the Deep Research agent's live
+ * extraction returned `details.languages` as human-readable names in
+ * Russian — ["Узбекский", "Русский", "Английский"] — because that is how
+ * the source pages themselves write it. The real BilimOn export uses
+ * lowercase 2-3 letter codes (uz/ru/en/de, counted across all 302 real
+ * records), so the validator rejected the record and an institution that
+ * had ALREADY passed the quality gate (confidence 93, completeness 73)
+ * was dropped to NEEDS_REVIEW over nothing but a label format. Normalizing
+ * here, rather than hoping the model always emits codes, is the reliable
+ * fix: a model asked for structured data will keep echoing whatever the
+ * source page uses.
+ *
+ * An unrecognized value is returned lowercased and trimmed rather than
+ * dropped — the validator still soft-flags codes outside the known set
+ * (the real export covers only 4 languages and cannot prove others are
+ * illegal), so a genuinely new language survives to human review instead
+ * of being silently deleted.
+ */
+const LANGUAGE_NAME_TO_CODE: Record<string, string> = {
+  // Uzbek
+  uz: "uz", uzb: "uz", uzbek: "uz", uzbekcha: "uz", "o'zbek": "uz", ozbek: "uz",
+  "o'zbekcha": "uz", ozbekcha: "uz", "o'zbek tili": "uz", "ozbek tili": "uz",
+  узбекский: "uz", узбек: "uz", "узбекский язык": "uz",
+  // Russian
+  ru: "ru", rus: "ru", russian: "ru", ruscha: "ru", "rus tili": "ru",
+  русский: "ru", "русский язык": "ru",
+  // English
+  en: "en", eng: "en", english: "en", ingliz: "en", inglizcha: "en", "ingliz tili": "en",
+  английский: "en", "английский язык": "en", англ: "en",
+  // German
+  de: "de", ger: "de", german: "de", deutsch: "de", nemis: "de", "nemis tili": "de",
+  немецкий: "de", "немецкий язык": "de",
+};
+
+/** Normalize one language label to its code, or null for empty input. */
+export function normalizeLanguageCode(raw: string | null | undefined): string | null {
+  if (!raw || !raw.trim()) return null;
+  const key = raw.trim().toLowerCase().replace(/\s+/g, " ");
+  return LANGUAGE_NAME_TO_CODE[key] ?? key;
+}
+
+/** Normalize a languages array, dropping empties and duplicates. */
+export function normalizeLanguages(raw: string[] | null | undefined): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const item of raw) {
+    const code = normalizeLanguageCode(item);
+    if (code && !out.includes(code)) out.push(code);
+  }
+  return out;
+}
