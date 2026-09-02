@@ -126,7 +126,22 @@ export async function searchInstitutions(
       "You are a discovery agent finding real, currently-operating education institutions " +
         "(language centers, tutoring, schools, exam-prep centers) in Uzbekistan, and recording each " +
         "one's contact profile: website and social-network addresses (Instagram, Telegram, Facebook), " +
-        "phone and address. Most real " +
+        "phone and address. " +
+        // Real production issue: a KIDS_EDUCATION-facet search returned "SOS
+        // Children's Villages Uzbekistan" — a children's charity/orphanage
+        // network, not a learning institution — because its name/description
+        // mentions children. Category labels like "bolalar rivojlanish
+        // markazi" (kids development center) can match a charity's wording
+        // even though it offers no paid courses/classes. Excluding by
+        // organization TYPE (charity/NGO/foundation/social-care), not by
+        // topic, keeps genuine kids' education centers in scope.
+        "ONLY include organizations that actually deliver paid or structured educational " +
+        "courses/classes/lessons to students (language centers, tutoring/course centers, schools, " +
+        "lyceums, exam-prep centers, kids' development/education centers that run classes). " +
+        "EXCLUDE charities, NGOs, foundations, orphanages, shelters, social-care or humanitarian " +
+        "organizations, government agencies, and hospitals/clinics, even if their name or " +
+        "description mentions children, education, or development — those are not learning " +
+        "institutions for this purpose. Most real " +
         "institutions are named and have websites/social pages in Uzbek or Russian, not English " +
         "— actively search in Uzbek and Russian as well as English, and do not skip an institution " +
         "just because its name or site is not in English. Uzbekistan business directories like " +
