@@ -55,10 +55,20 @@ export interface DiscoveredInstitution {
 export interface EvidenceItem {
   fetchedAt: string;
   sourceUrl: string;
-  sourceType: "website" | "social" | "directory" | "fixture" | "other";
+  /** "search" is the web-search-grounded per-institution research call
+   * (agents/researcher.ts, Agent 2's primary source); the others are
+   * fetched/scraped pages, or "fixture" for --mock evidence. */
+  sourceType: "website" | "social" | "directory" | "search" | "fixture" | "other";
   extractedFields: Partial<RawExtractedFields>;
   rawTextExcerpt?: string;
-  confidence: number; // 0-1, this evidence item's own reliability
+  /** 0-1, this evidence item's own reliability. Real mode derives it from
+   * source type, how much substantive detail the source actually yielded,
+   * and how many other sources corroborate it — see
+   * services/scoring.ts::computeEvidenceConfidence. It used to be the
+   * constant 0.6 for every real-mode item, which (with an evidence array
+   * that was never longer than 1) pinned sourceConfidence at exactly 52 on
+   * every real run and made APPROVED mathematically unreachable. */
+  confidence: number;
 }
 
 /** Research evidence file: data/research/<id>.json — append-only. */
@@ -94,6 +104,13 @@ export interface RawExtractedFields {
   shifts?: string[];
   specializations?: string[];
   achievements?: string;
+  /** Free-text price information exactly as a source stated it (e.g. "oyiga
+   * 500 000 so'mdan"). Deliberately NOT mapped to the export's `pricing`
+   * field: the real BilimOn pricing shape needs numeric monthlyMin/
+   * monthlyMax/paymentMethods, and deriving those from a free-text hint
+   * means guessing numbers. Kept as evidence for the human reviewing a
+   * NEEDS_REVIEW record, and as material the content stage may quote. */
+  pricingNote?: string;
   categories?: Category[];
   descriptionSourceText?: string; // real source text the content manager may draw on
 }

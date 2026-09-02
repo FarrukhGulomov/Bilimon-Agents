@@ -21,6 +21,7 @@ import { runWithConcurrency } from "../services/concurrency.js";
 import { loadExecutionConfig } from "../services/execution-config.js";
 import { resolveBrief, type DiscoveryScope } from "../services/brief-parser.js";
 import { persistLastScope } from "../services/scope-store.js";
+import { isFatalProviderError } from "../services/llm-client.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATE_DIR = join(__dirname, "..", "..", "data", "state");
@@ -212,9 +213,24 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
       if (!isPastStage(state.state, "RESEARCHING")) {
         transition(state, "RESEARCHING");
       }
+      // Real production failure: this used to pass `[cand.sourceUrl]` — a
+      // SINGLE url — into a scrape-only researcher, so Agent 2 had exactly
+      // one chance to get anything at all, through the one mechanism (naive
+      // fetch + regex tag-strip) that the real web most reliably defeats.
+      // Agent 2 now gets the institution's identity plus every link Agent 1
+      // saw, and runs a search-grounded research call over them with the
+      // scrape as a supplement.
       const researchRecord = opts.mock
         ? researchMock(id, nameKey, cand.fixtureId ?? cand.discoveryId)
-        : await researchLive(id, nameKey, [cand.sourceUrl].filter(Boolean) as string[]);
+        : await researchLive(id, nameKey, {
+            name: cand.rawName,
+            city: cand.city,
+            website: cand.website,
+            telegram: cand.telegram,
+            instagram: cand.instagram,
+            facebook: cand.facebook,
+            sourceUrl: cand.sourceUrl,
+          });
       const { fields, evidenceCount, bestSourceConfidence } = mergeEvidence(researchRecord);
       // Fill in city/category from discovery if research didn't supply them.
       // Real production bug: researchLive's extraction prompt never asks for
@@ -240,6 +256,10 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
       if (!fields.website && cand.website) fields.website = cand.website;
       if (!fields.telegram && cand.telegram) fields.telegram = cand.telegram;
       if (!fields.instagram && cand.instagram) fields.instagram = cand.instagram;
+      // address is a REQUIRED_FOR_COMPLETENESS field (services/scoring.ts),
+      // and in live mode Agent 1 now often has it from a yellowpages.uz /
+      // goldenpages.uz listing even when research came back without one.
+      if (!fields.address && cand.address) fields.address = cand.address;
 
       transition(state, "VERIFIED");
 
@@ -307,6 +327,17 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
       transition(state, "APPROVED", `quality score ${score.qualityScore} (${score.status})`);
       return "approved";
     } catch (err) {
+      // A fatal provider error (bad key / out of credits) will hit every
+      // remaining institution identically — retrying it MAX_RETRIES times
+      // per candidate just burns the rest of the batch against the same
+      // wall. Let it unwind to cli.ts, which prints one clear line and
+      // exits non-zero. Work already written to data/state|processed stays
+      // on disk, so a rerun picks up where this stopped.
+      if (isFatalProviderError(err)) {
+        state.lastError = (err as Error).message;
+        writeState(state);
+        throw err;
+      }
       state.retryCount = (state.retryCount ?? 0) + 1;
       state.lastError = (err as Error).message;
       if (state.retryCount >= MAX_RETRIES) {

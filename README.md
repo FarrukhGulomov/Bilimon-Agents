@@ -109,12 +109,14 @@ mode output is for pipeline testing only.
 ```
 Orchestrator (src/agents/orchestrator.ts)
   │
-  ├─ Discovery agent        → raw candidates (live web search, or --mock fixtures)
+  ├─ Discovery agent        → candidate profiles: name + website + socials +
+  │                            phone + address (live web search, or --mock fixtures)
   ├─ Deduplicator service   → deterministic name/phone/domain/social matching
   │                            + AI-assisted fallback for ambiguous cases
   ├─ Concurrency limiter    → caps how many institutions run the two stages below
   │  (services/concurrency.ts) at once (config/execution.json maxConcurrency)
-  ├─ Researcher agent       → per-institution evidence (scrape+extract, or --mock fixtures)
+  ├─ Researcher agent       → per-institution evidence: a search-grounded research
+  │                            call + best-effort HTML scrape (or --mock fixtures)
   ├─ Content Manager agent  → natural Uzbek/Russian descriptions from verified facts only
   ├─ BilimOn Exporter agent → maps merged fields → real BilimOn schema
   ├─ Scoring service        → sourceConfidence / dataCompleteness / qualityScore
@@ -133,6 +135,54 @@ limiter in place — verified by actually running `--mock` batches partway
 (e.g. `--count 20` then `--count 40`) and confirming the first batch's
 outcomes are unchanged and only the newly-added institutions are
 processed on the second run.
+
+### Real-mode agent chain (what each agent actually does against the live web)
+
+The four agents map onto the product spec as follows. Everything here is
+the **real-mode** path; `--mock` still runs entirely from the 40 fixtures
+with zero network calls.
+
+1. **Discovery (`agents/discovery.ts` + `services/search.ts`).** Each
+   (city, category/type) facet runs one web-search call that returns up to
+   10 institution *profiles* — name, the page it was found on, official
+   website, Instagram/Telegram/Facebook, phone, address — from official
+   sites, social pages, and the yellowpages.uz / goldenpages.uz business
+   directories. Anything the model did not actually see must come back
+   `null`; nothing is invented. Every field flows onto the
+   `DiscoveryCandidate` and into the orchestrator's "fill in from discovery
+   if research didn't supply it" fallback.
+2. **Deep Research (`agents/researcher.ts`).** Two sources per institution:
+   a **primary** web-search-grounded research call scoped to that one named
+   institution (official site → Instagram/Telegram → yellowpages.uz /
+   goldenpages.uz), returning the full sales fact set including
+   `descriptionSourceText`; and a **supplementary**, best-effort HTML
+   scrape of the URLs known for it. A refused or empty fetch is a normal,
+   silent outcome — never the only path to evidence. Each evidence item
+   then gets a confidence derived from its source kind, how much
+   substantive detail it actually yielded, and how many identifying facts
+   (phone/website/address) another source independently corroborates
+   (`services/scoring.ts::computeEvidenceConfidence`).
+3. **Content Manager (`agents/content-manager.ts`).** Writes when there is
+   enough real material — a name, a place, an institution kind, and at
+   least two substantive facts (programs, specializations, founding year,
+   address, counts, languages, shifts, achievements, or real source text)
+   — not only when `descriptionSourceText` exists. Uzbek and Russian are
+   written as two independent pieces about the same facts, never a
+   word-for-word translation. All existing safety rules stand: verified
+   facts only, no invented programs/years/counts/achievements, no
+   superlative or ranking claims unless the evidence itself carries a
+   third-party claim, and `null` + `needsContentReview` when material is
+   genuinely too thin.
+4. **Exporter (`agents/bilimon-exporter.ts`).** Unchanged: maps merged
+   fields to the real BilimOn schema, `id: null` on export.
+
+Provider failures are contained at each boundary: an ordinary failure
+costs only its own search or institution (logged as one warning), while a
+fatal one — HTTP 401/403 (key rejected) or 402 (out of credits) — stops
+the run early with a single actionable line and a non-zero exit, rather
+than hitting the same wall on every remaining call. Work already written
+to `data/state/` and `data/processed/` survives, so a rerun resumes from
+there. See `services/llm-client.ts::classifyProviderError`.
 
 ### Scaling to nationwide coverage: concurrency, progress, token tracking
 
@@ -473,9 +523,13 @@ blockers:
   execution** in this build environment (no outbound network / API key
   available) — only `--mock` mode has been run and validated end-to-end.
 - Pricing (`pricing` field), media, and `branches` are left as
-  null/empty-array throughout the pipeline's own output — the
-  researcher/extractor don't yet attempt to find pricing or multi-branch
-  data. This is no longer "expectations unknown" (pricing's real shape is
+  null/empty-array throughout the pipeline's own output. The researcher
+  now *asks* for price information and keeps whatever it finds verbatim as
+  a free-text `pricingNote` on the internal fields (evidence for a human
+  reviewer), but it is deliberately not mapped to the export's `pricing`
+  shape: that needs numeric `monthlyMin`/`monthlyMax`/`paymentMethods`,
+  and deriving those from a free-text hint means guessing numbers. Media
+  and multi-branch data are still not a research target. This is no longer "expectations unknown" (pricing's real shape is
   now confirmed — see "Schema status" above) but simply not yet
   implemented as a research target.
 - The concurrency limiter, progress reporting, and token-usage accumulator
@@ -514,7 +568,7 @@ blockers:
   no-op on outcomes (idempotency unaffected by the concurrency changes).
 - `PIPELINE_MAX_CONCURRENCY=1` override confirmed to take effect (env var
   takes priority over `config/execution.json`).
-- `npm test`: 55 assertions covering slug determinism (including two real
+- `npm test`: 145 assertions covering slug determinism (including two real
   examples from the reference export, "King's Academy" → `kings-academy`
   and "Najot Ta'lim" → `najot-talim`), phone validation, dedupe collapse,
   enum rejection, real city-alias resolution (including the coverage-gap
@@ -530,7 +584,11 @@ blockers:
   matching the exact pre-brief-feature default categories, and `--mock`
   discovery visibly filtering the 40 fixtures by the resolved
   `DiscoveryScope` (e.g. `"maktablar"` narrows to just the SCHOOL-tagged
-  fixtures) — all passing.
+  fixtures), real-mode evidence confidence varying with source kind/detail/
+  corroboration (and a well-researched institution reaching `APPROVED`
+  while a thin one stays in `NEEDS_REVIEW`), discovery mapping a full
+  search profile onto a candidate, the content manager's "enough material"
+  gate, and provider-error classification (401/402/403/429) — all passing.
 - `npx tsx src/cli.ts run --count 40 --mock` (no `--brief`): confirmed
   identical outcome to before this feature (39 unique candidates after
   dedupe, `resolvedScope.source === "default"`, same 4 categories).
