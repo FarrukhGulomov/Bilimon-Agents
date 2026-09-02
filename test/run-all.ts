@@ -49,6 +49,7 @@ import {
 } from "../src/services/llm-client.js";
 import { resolveBriefHeuristic, loadDefaultScope, resolveBrief } from "../src/services/brief-parser.js";
 import { discoverMock, mapSearchResultToCandidate } from "../src/agents/discovery.js";
+import { buildScopeInstruction } from "../src/services/search.js";
 import { assessContentMaterial } from "../src/agents/content-manager.js";
 import { classifySourceUrl, normalizeResearchFields, scoreEvidenceItems } from "../src/agents/researcher.js";
 import {
@@ -525,6 +526,25 @@ console.log("9c. buildExportRecord: a genuinely missing phone is legal (real dat
 
   const goodPhone = buildExportRecord("id3", "slug", "namekey", { ...baseFields, phone: "+998712000004" }, baseContent);
   assert(goodPhone.record?.phone === "+998712000004", "a valid supplied phone is still normalized and kept");
+}
+
+console.log("9i. discovery scope excludes full universities/schools by default (MVP: learning centers only)");
+{
+  // Real production issue: a UNIVERSITY_PREP-facet search (type left
+  // unset, i.e. the default case for every current facet) returned "INHA
+  // University Tashkent" and "Tashkent Metropolitan University" — full
+  // degree-granting universities — because their own English-prep programs
+  // matched the facet wording. User decision (2026-09-02): universities/
+  // institutes and K-12 schools/lyceums are a separate later product
+  // phase; this pipeline's current MVP scope is learning centers only.
+  const defaultScope = buildScopeInstruction(undefined);
+  assert(/degree-granting universit/i.test(defaultScope), "the default (no explicit type) instruction excludes degree-granting universities");
+  assert(/K-12 schools and lyceums/i.test(defaultScope), "the default instruction also excludes K-12 schools/lyceums");
+  assert(/charit(y|ies)/i.test(defaultScope), "the charity/NGO exclusion from the earlier fix is still present in the default case");
+
+  const schoolScope = buildScopeInstruction("SCHOOL");
+  assert(/schools, lyceums/i.test(schoolScope), 'an explicit type="SCHOOL" request (a future, brief-narrowed case) is schools-inclusive');
+  assert(!/degree-granting universit/i.test(schoolScope), "the schools-inclusive branch doesn't carry the university exclusion wording (it's a different scope, not a superset)");
 }
 
 console.log("9h. bilimon-import.json is wrapped {version, exportedAt, institutions: [...]}, not a bare array");

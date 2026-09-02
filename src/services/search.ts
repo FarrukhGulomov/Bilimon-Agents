@@ -101,6 +101,46 @@ const TYPE_LABELS: Record<InstitutionType, string> = {
  * provider error (bad key / no credits) escapes, so the run can stop with a
  * clear message instead of hitting the same wall on every remaining search.
  */
+// MVP scope decision (user, 2026-09-02): full universities/institutes and
+// K-12 schools/lyceums are planned as their OWN separate product phase
+// later — right now this pipeline targets only "o'quv markazlari" (learning
+// centers): language centers, course centers, tutoring, and exam-prep. Real
+// production issue this fixes: a UNIVERSITY_PREP-facet search returned
+// "INHA University Tashkent" and "Tashkent Metropolitan University" — full
+// degree-granting universities (Bachelor's/Master's/MBA) — because their own
+// English-language/foundation-year prep programs matched the facet's
+// wording. Gated on `type`, not hardcoded globally: a caller that explicitly
+// asks for SCHOOL/LYCEUM (once that later phase exists and a brief narrows
+// to it) gets the schools-inclusive instructions instead — this is a
+// current-scope narrowing, not a permanent architectural exclusion.
+export function buildScopeInstruction(type: string | undefined): string {
+  if (type === "SCHOOL" || type === "LYCEUM") {
+    return (
+      "ONLY include organizations that actually deliver paid or structured educational " +
+      "courses/classes/lessons to students (schools, lyceums, and other K-12 institutions). " +
+      "EXCLUDE charities, NGOs, foundations, orphanages, shelters, social-care or humanitarian " +
+      "organizations, government agencies, and hospitals/clinics, even if their name or " +
+      "description mentions children, education, or development — those are not learning " +
+      "institutions for this purpose."
+    );
+  }
+  return (
+    "ONLY include \"o'quv markazi\"-style learning centers that deliver paid or structured " +
+    "courses/classes/lessons directly to students: language centers, tutoring/course centers, " +
+    "and exam-prep centers (IELTS, SAT, university-entrance-prep courses, kids' development " +
+    "centers that run classes). " +
+    "EXCLUDE: (1) full degree-granting universities, institutes, colleges, and academies that " +
+    "confer Bachelor's/Master's/MBA/PhD degrees — even if the university also runs its own " +
+    "English-language, foundation-year, or exam-prep courses, the university itself is out of " +
+    "scope for now (a separate universities/institutes product phase is planned later); " +
+    "(2) full K-12 schools and lyceums (also a separate later phase); " +
+    "(3) charities, NGOs, foundations, orphanages, shelters, social-care or humanitarian " +
+    "organizations, government agencies, and hospitals/clinics, even if their name or " +
+    "description mentions children, education, or development. " +
+    "None of these are learning-center institutions for this purpose."
+  );
+}
+
 export async function searchInstitutions(
   city: string,
   category?: string,
@@ -124,24 +164,11 @@ export async function searchInstitutions(
     results = await webSearchStructuredList<DiscoverySearchResult>(
       query,
       "You are a discovery agent finding real, currently-operating education institutions " +
-        "(language centers, tutoring, schools, exam-prep centers) in Uzbekistan, and recording each " +
+        "(language centers, tutoring, exam-prep centers) in Uzbekistan, and recording each " +
         "one's contact profile: website and social-network addresses (Instagram, Telegram, Facebook), " +
         "phone and address. " +
-        // Real production issue: a KIDS_EDUCATION-facet search returned "SOS
-        // Children's Villages Uzbekistan" — a children's charity/orphanage
-        // network, not a learning institution — because its name/description
-        // mentions children. Category labels like "bolalar rivojlanish
-        // markazi" (kids development center) can match a charity's wording
-        // even though it offers no paid courses/classes. Excluding by
-        // organization TYPE (charity/NGO/foundation/social-care), not by
-        // topic, keeps genuine kids' education centers in scope.
-        "ONLY include organizations that actually deliver paid or structured educational " +
-        "courses/classes/lessons to students (language centers, tutoring/course centers, schools, " +
-        "lyceums, exam-prep centers, kids' development/education centers that run classes). " +
-        "EXCLUDE charities, NGOs, foundations, orphanages, shelters, social-care or humanitarian " +
-        "organizations, government agencies, and hospitals/clinics, even if their name or " +
-        "description mentions children, education, or development — those are not learning " +
-        "institutions for this purpose. Most real " +
+        buildScopeInstruction(type) +
+        " Most real " +
         "institutions are named and have websites/social pages in Uzbek or Russian, not English " +
         "— actively search in Uzbek and Russian as well as English, and do not skip an institution " +
         "just because its name or site is not in English. Uzbekistan business directories like " +
