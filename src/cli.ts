@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import { runPipeline, finalizeExport } from "./agents/orchestrator.js";
 import { validateBatch } from "./services/validator.js";
 import type { BilimOnExportRecord } from "./types/index.js";
-import { MissingApiKeyError, hasApiKey } from "./services/llm-client.js";
+import { MissingApiKeyError, hasApiKey, isFatalProviderError } from "./services/llm-client.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXPORT_DIR = join(__dirname, "..", "data", "export");
@@ -54,16 +54,37 @@ async function cmdRun(flags: Record<string, string | boolean>) {
     return;
   }
   console.log(`Running pipeline: count=${count} mock=${mock}${brief ? ` brief="${brief}"` : ""}`);
-  const summary = await runPipeline({
-    count,
-    mock,
-    brief,
-    onProgress: (p) =>
-      console.log(
-        `progress: processed ${p.completed}/${p.total}, approved ${p.approved}, ` +
-          `needs_review ${p.needsReview}, rejected ${p.rejected}, duplicates ${p.duplicates}`
-      ),
-  });
+  let summary;
+  try {
+    summary = await runPipeline({
+      count,
+      mock,
+      brief,
+      onProgress: (p) =>
+        console.log(
+          `progress: processed ${p.completed}/${p.total}, approved ${p.approved}, ` +
+            `needs_review ${p.needsReview}, rejected ${p.rejected}, duplicates ${p.duplicates}`
+        ),
+    });
+  } catch (err) {
+    // Real production failure: an OpenRouter `APIError: 402 This request
+    // would exceed your available credits` escaped a single discovery search
+    // and killed the run with a multi-screen stack trace mid-discovery. A
+    // provider being out of credits (or holding a bad key) is an operator
+    // problem with a one-line fix, so print exactly that one line, still
+    // export whatever earlier institutions completed (their state/processed
+    // files are already on disk, and a rerun resumes from there), and exit
+    // non-zero.
+    if (isFatalProviderError(err)) {
+      console.error(`\nRun stopped: ${err.info.message}`);
+      const partial = finalizeExport();
+      console.log(`Wrote ${partial.importPath} (records completed before the run stopped)`);
+      console.log(`Wrote ${partial.reportPath}`);
+      process.exitCode = 1;
+      return;
+    }
+    throw err;
+  }
   console.log(
     `Resolved scope (source=${summary.resolvedScope.source}): ` +
       `types=${JSON.stringify(summary.resolvedScope.types)}, ` +
@@ -161,4 +182,18 @@ async function main() {
   }
 }
 
-main();
+// An unhandled promise rejection out of main() prints a raw stack trace and,
+// on some Node versions, a confusing "[UnhandledPromiseRejection]" crash —
+// which is exactly what the user saw when a provider error escaped a real
+// run. Every path out of the process now prints a readable message and sets
+// a non-zero exit code.
+main().catch((err) => {
+  const message = err instanceof Error ? err.message : String(err);
+  console.error(`Pipeline failed: ${message}`);
+  if (process.env.PIPELINE_DEBUG === "1" && err instanceof Error && err.stack) {
+    console.error(err.stack);
+  } else {
+    console.error("(set PIPELINE_DEBUG=1 for the full stack trace)");
+  }
+  process.exitCode = 1;
+});

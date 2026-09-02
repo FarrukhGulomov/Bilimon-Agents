@@ -1,9 +1,28 @@
 /**
- * Deep Research agent. In --mock mode, reads evidence from
- * data/fixtures/mock-research.json (FIXTURE/TEST DATA). In real mode,
- * would scrape discovered URLs (services/scraper.ts) and run LLM-assisted
- * extraction (services/extractor.ts) — not exercised in this build
- * environment (no live network/API access).
+ * Deep Research agent (Agent 2). In --mock mode, reads evidence from
+ * data/fixtures/mock-research.json (FIXTURE/TEST DATA).
+ *
+ * REAL MODE — two sources per institution (not exercised by execution in
+ * this build environment; no live network/API access):
+ *
+ *  1. PRIMARY, always: one web-search-grounded research call scoped to this
+ *     single institution (llm-client.ts::researchInstitutionViaWebSearch).
+ *     It is told to check the official site, Instagram/Telegram, and the
+ *     yellowpages.uz / goldenpages.uz directories, and to return the full
+ *     "sales" fact set including descriptionSourceText — the field Agent 3
+ *     writes from.
+ *  2. SUPPLEMENTARY, best-effort: the plain HTML scrape (scraper.ts +
+ *     extractor.ts) of the URLs we know about. A failed or empty fetch is a
+ *     normal, silent outcome.
+ *
+ * Why (real production failure): this used to be scrape-only, over exactly
+ * ONE url (the orchestrator passed `[cand.sourceUrl]`), through a naive
+ * fetch() + regex tag-strip. Against the real web that yields nothing for
+ * most sources — Instagram/Telegram/Facebook serve login walls, JS-only
+ * sites serve empty shells, many hosts 403 a non-browser user-agent — so
+ * `page.text` was empty, the loop `continue`d, and the evidence array came
+ * out length 0. Zero evidence means zero extracted fields, which is why
+ * every real run produced no usable records while --mock looked perfect.
  *
  * Research evidence files under data/research/<id>.json are append-only:
  * existing evidence items (matched by sourceUrl) are never overwritten,
@@ -16,6 +35,8 @@ import { dirname, join } from "node:path";
 import type { EvidenceItem, RawExtractedFields, ResearchRecord } from "../types/index.js";
 import { fetchAndCache } from "../services/scraper.js";
 import { extractFieldsFromText } from "../services/extractor.js";
+import { computeEvidenceConfidence, countCorroboratedFields } from "../services/scoring.js";
+import { handleProviderError, researchInstitutionViaWebSearch } from "../services/llm-client.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const RESEARCH_DIR = join(__dirname, "..", "..", "data", "research");
@@ -73,27 +94,191 @@ export function researchMock(id: string, nameKey: string, fixtureId: string): Re
   return appendEvidence(id, nameKey, items);
 }
 
-/** Real research: scrape + extract from a set of source URLs. Not exercised in this build. */
+/** Everything Agent 1 knows about one institution, handed to Agent 2 as
+ * research starting points (never as facts to repeat back). */
+export interface LiveResearchInput {
+  name: string;
+  city?: string;
+  website?: string | null;
+  telegram?: string | null;
+  instagram?: string | null;
+  facebook?: string | null;
+  /** The page discovery found the institution on (a directory listing, a
+   * blog roundup, the official site — whatever the search returned). */
+  sourceUrl?: string | null;
+}
+
+/** At most this many pages are scraped per institution. The scrape is the
+ * supplementary source; it is not worth minutes of wall clock per record. */
+const MAX_SCRAPE_URLS = 4;
+
+/** Synthetic, stable provenance key for the search-grounded research item.
+ * A synthetic scheme (not a real page URL) is deliberate: appendEvidence
+ * dedupes by sourceUrl, so keying this item by one of the pages the model
+ * cited would silently suppress the scraped evidence for that same page. */
+function researchEvidenceUrl(nameKey: string): string {
+  return `research://web-search/${encodeURIComponent(nameKey)}`;
+}
+
+/** Classifies a URL for confidence purposes — see SOURCE_TYPE_BASE in
+ * services/scoring.ts for what each kind is worth. */
+export function classifySourceUrl(url: string): EvidenceItem["sourceType"] {
+  const u = url.toLowerCase();
+  if (/(instagram\.com|t\.me|telegram\.me|facebook\.com|fb\.com)/.test(u)) return "social";
+  if (/(yellowpages\.uz|goldenpages\.uz|maps\.|2gis\.|olx\.uz|orgpage|yandex\.[a-z]+\/maps)/.test(u)) return "directory";
+  if (/^https?:\/\//.test(u)) return "website";
+  return "other";
+}
+
+/**
+ * Normalizes whatever the research call returned into RawExtractedFields:
+ * drops nulls, empty strings and empty arrays (so an "I found nothing"
+ * answer never looks like a real value), keeps only known field names, and
+ * coerces the numeric fields. Pure and exported so it is testable offline.
+ */
+export function normalizeResearchFields(raw: Record<string, unknown> | null | undefined): Partial<RawExtractedFields> {
+  const out: Record<string, unknown> = {};
+  if (!raw || typeof raw !== "object") return out;
+
+  const stringFields = [
+    "nameUz", "nameRu", "nameLatin", "phone", "phone2", "email", "website",
+    "telegram", "instagram", "city", "address", "achievements", "pricingNote",
+    "descriptionSourceText",
+  ];
+  const arrayFields = ["languages", "programs", "shifts", "specializations"];
+  const numberFields = ["foundedYear", "studentCount", "teacherCount"];
+
+  for (const key of stringFields) {
+    const value = raw[key];
+    if (typeof value === "string" && value.trim().length > 0) out[key] = value.trim();
+  }
+  for (const key of arrayFields) {
+    const value = raw[key];
+    if (!Array.isArray(value)) continue;
+    const items = value.filter((v): v is string => typeof v === "string" && v.trim().length > 0).map((v) => v.trim());
+    if (items.length > 0) out[key] = items;
+  }
+  for (const key of numberFields) {
+    const value = raw[key];
+    const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+    if (Number.isFinite(n) && n > 0) out[key] = Math.round(n);
+  }
+  return out as Partial<RawExtractedFields>;
+}
+
+/**
+ * Assigns each evidence item a confidence that reflects what it actually
+ * contributed: its source kind, how much substantive detail it yielded, and
+ * how many identifying facts (phone/website/address) the OTHER items agree
+ * on. Replaces the old hardcoded 0.6 (see EvidenceItem.confidence in
+ * types/index.ts for why that constant broke every real run). Pure and
+ * exported for offline tests.
+ */
+export function scoreEvidenceItems(
+  items: Omit<EvidenceItem, "confidence">[]
+): EvidenceItem[] {
+  return items.map((item, i) => {
+    const others = items.filter((_, j) => j !== i).map((o) => o.extractedFields);
+    return {
+      ...item,
+      confidence: computeEvidenceConfidence({
+        sourceType: item.sourceType,
+        fields: item.extractedFields,
+        corroboratedFieldCount: countCorroboratedFields(item.extractedFields, others),
+      }),
+    };
+  });
+}
+
+/** Ordered, deduped list of pages worth scraping for one institution. */
+function buildScrapeTargets(input: LiveResearchInput, researchCitedUrls: string[]): string[] {
+  const ordered = [input.website, input.sourceUrl, ...researchCitedUrls, input.telegram, input.instagram];
+  const seen = new Set<string>();
+  const targets: string[] = [];
+  for (const url of ordered) {
+    if (!url || typeof url !== "string") continue;
+    const trimmed = url.trim();
+    if (!/^https?:\/\//i.test(trimmed)) continue; // "@handle" and bare domains aren't fetchable as-is
+    if (seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    targets.push(trimmed);
+    if (targets.length >= MAX_SCRAPE_URLS) break;
+  }
+  return targets;
+}
+
+/**
+ * Real research for one institution. Never throws for an ordinary failure:
+ * a failing search call, a refused fetch or a failing extraction each cost
+ * only their own evidence item, so one bad institution can never take down
+ * a batch. Only a fatal provider error (bad key / no credits) escapes, so
+ * the orchestrator can stop the run with a clear message.
+ *
+ * Not exercised by execution in this build environment (no network/API key).
+ */
 export async function researchLive(
   id: string,
   nameKey: string,
-  sourceUrls: string[]
+  input: LiveResearchInput
 ): Promise<ResearchRecord> {
-  const items: EvidenceItem[] = [];
-  for (const url of sourceUrls) {
-    const page = await fetchAndCache(url);
-    if (!page.text) continue;
-    const extracted = await extractFieldsFromText(url, page.text);
-    items.push({
-      fetchedAt: new Date().toISOString(),
-      sourceUrl: url,
-      sourceType: "website",
-      extractedFields: extracted,
-      rawTextExcerpt: page.text.slice(0, 500),
-      confidence: 0.6, // heuristic default for a single unverified source in real mode
+  const unscored: Omit<EvidenceItem, "confidence">[] = [];
+  const now = () => new Date().toISOString();
+
+  // --- Source 1 (primary): web-search-grounded research on this institution.
+  let citedUrls: string[] = [];
+  try {
+    const research = await researchInstitutionViaWebSearch({
+      name: input.name,
+      city: input.city,
+      knownLinks: [input.website, input.telegram, input.instagram, input.facebook, input.sourceUrl],
     });
+    if (research) {
+      const fields = normalizeResearchFields(research.fields);
+      citedUrls = Array.isArray(research.sourceUrls)
+        ? research.sourceUrls.filter((u): u is string => typeof u === "string" && /^https?:\/\//i.test(u))
+        : [];
+      if (Object.keys(fields).length > 0) {
+        unscored.push({
+          fetchedAt: now(),
+          sourceUrl: researchEvidenceUrl(nameKey),
+          sourceType: "search",
+          extractedFields: fields,
+          rawTextExcerpt: fields.descriptionSourceText?.slice(0, 500),
+        });
+      }
+    }
+  } catch (err) {
+    // Fatal (401/402) rethrows for the orchestrator to stop the run on;
+    // anything else is one institution's bad luck, logged and survived.
+    const info = handleProviderError(err);
+    console.warn(`Research: web-search research failed for "${input.name}" — ${info.message}`);
   }
-  return appendEvidence(id, nameKey, items);
+
+  // --- Source 2 (supplementary, best-effort): plain HTML scrape.
+  for (const url of buildScrapeTargets(input, citedUrls)) {
+    try {
+      const page = await fetchAndCache(url);
+      // No text is the NORMAL case for login-walled socials, JS-only sites
+      // and 403s — silent, not an error, and never the only path to
+      // evidence any more.
+      if (!page.text || page.text.length < 200) continue;
+      const extracted = await extractFieldsFromText(url, page.text);
+      const fields = normalizeResearchFields(extracted as Record<string, unknown>);
+      if (Object.keys(fields).length === 0) continue;
+      unscored.push({
+        fetchedAt: now(),
+        sourceUrl: url,
+        sourceType: classifySourceUrl(url),
+        extractedFields: fields,
+        rawTextExcerpt: page.text.slice(0, 500),
+      });
+    } catch (err) {
+      const info = handleProviderError(err);
+      console.warn(`Research: scrape/extract failed for ${url} — ${info.message}`);
+    }
+  }
+
+  return appendEvidence(id, nameKey, scoreEvidenceItems(unscored));
 }
 
 /** Merge all evidence for a research record into one RawExtractedFields, preferring

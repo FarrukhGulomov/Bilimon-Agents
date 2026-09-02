@@ -242,9 +242,24 @@ export interface WebSearchResultItem {
 
 /**
  * Runs a live web search and asks the model to summarize/list findings
- * relevant to `query` as structured JSON. Requires the active provider's
- * API key (OPENAI_API_KEY, or OPENROUTER_API_KEY when
- * SEARCH_PROVIDER=openrouter). Never called in --mock mode.
+ * relevant to `query` as a JSON array of {title,url,snippet}. Requires the
+ * active provider's API key (OPENAI_API_KEY, or OPENROUTER_API_KEY when
+ * SEARCH_PROVIDER=openrouter). Never called in --mock mode. Kept as the
+ * thin "just give me links" wrapper over webSearchStructuredList below,
+ * which is what the provider branching now lives in.
+ */
+export async function webSearchAndSummarize(query: string, instructions: string): Promise<WebSearchResultItem[]> {
+  return webSearchStructuredList<WebSearchResultItem>(
+    query,
+    instructions,
+    `[{"title": string, "url": string, "snippet": string}]`
+  );
+}
+
+/**
+ * The single provider-branching web-search call every grounded call in this
+ * pipeline goes through. Returns the model's raw response text (or null when
+ * the provider returned no text at all).
  *
  * OpenAI path: declares the hosted `web_search` Responses API tool
  * (confirmed against the installed `openai` package's bundled type
@@ -257,41 +272,56 @@ export interface WebSearchResultItem {
  * Chat Completions — see the OPENROUTER WEB SEARCH CAVEAT in this file's
  * header comment for the source/caveats on this mechanism.
  */
-export async function webSearchAndSummarize(query: string, instructions: string): Promise<WebSearchResultItem[]> {
-  const fullInstructions =
-    `${instructions}\n\n` +
-    `After searching, respond with ONLY a JSON array of objects: ` +
-    `[{"title": string, "url": string, "snippet": string}]`;
-  let text: string | null | undefined;
-
+async function runWebSearch(query: string, instructions: string, maxWebResults = 5): Promise<string | null> {
   if (getProvider() === "openrouter") {
     const client = getOpenRouterClient();
     const response = await client.chat.completions.create({
       model: getModel(),
       messages: [
-        { role: "system", content: fullInstructions },
+        { role: "system", content: instructions },
         { role: "user", content: query },
       ],
       // @ts-expect-error -- `plugins` is an OpenRouter-specific extension to
       // the OpenAI-compatible Chat Completions request body; the `openai`
       // npm package's types don't know about it, but OpenRouter's API
       // accepts it as a top-level request field. See file header comment.
-      plugins: [{ id: "web", max_results: 5 }],
+      plugins: [{ id: "web", max_results: maxWebResults }],
     });
     recordUsage({ input_tokens: response.usage?.prompt_tokens, output_tokens: response.usage?.completion_tokens });
-    text = response.choices[0]?.message?.content;
-  } else {
-    const openai = getOpenAIClient();
-    const response = await openai.responses.create({
-      model: getModel(),
-      tools: [{ type: "web_search" }],
-      instructions: fullInstructions,
-      input: query,
-    });
-    recordUsage(response.usage);
-    text = response.output_text;
+    return response.choices[0]?.message?.content ?? null;
   }
+  const openai = getOpenAIClient();
+  const response = await openai.responses.create({
+    model: getModel(),
+    tools: [{ type: "web_search" }],
+    instructions,
+    input: query,
+  });
+  recordUsage(response.usage);
+  return response.output_text ?? null;
+}
 
+/**
+ * Runs a live web search and asks the model to return a JSON ARRAY of
+ * objects matching `schemaDescription`. Requires the active provider's API
+ * key (OPENAI_API_KEY, or OPENROUTER_API_KEY when
+ * SEARCH_PROVIDER=openrouter). Never called in --mock mode.
+ *
+ * Used by the Discovery agent (services/search.ts) to get a structured
+ * *profile* per institution rather than a bare link — see that file for why
+ * a bare {title,url,snippet} triple was not enough in real mode.
+ */
+export async function webSearchStructuredList<T>(
+  query: string,
+  instructions: string,
+  schemaDescription: string,
+  maxWebResults = 8
+): Promise<T[]> {
+  const fullInstructions =
+    `${instructions}\n\n` +
+    `After searching, respond with ONLY a JSON array (no prose, no markdown fences) ` +
+    `whose elements match this shape:\n${schemaDescription}`;
+  const text = await runWebSearch(query, fullInstructions, maxWebResults);
   if (!text) return [];
   let parsed: unknown;
   try {
@@ -299,7 +329,47 @@ export async function webSearchAndSummarize(query: string, instructions: string)
   } catch {
     return [];
   }
-  return coerceToResultArray(parsed);
+  return coerceToArray<T>(parsed);
+}
+
+/**
+ * Runs a live web search scoped to ONE named institution and asks the model
+ * for a single JSON OBJECT matching `schemaDescription`. Returns null when
+ * the model produced nothing parseable (treated by the caller as "this
+ * source yielded no evidence", never as a crash).
+ *
+ * This is Agent 2's (Deep Research) primary source. The pipeline's original
+ * real-mode research was a naive `fetch()` + regex tag-strip of ONE
+ * discovery URL: against the real web that returns nothing usable for the
+ * majority of sources (Instagram/Telegram/Facebook serve login walls,
+ * modern JS sites serve empty shells, many hosts 403 a non-browser
+ * user-agent), so evidence arrays came back empty and every real run
+ * produced zero usable records. A search-grounded call reads what a human
+ * researcher would actually read, so it is the primary path and the scrape
+ * is supplementary — see agents/researcher.ts.
+ */
+export async function webSearchStructuredObject<T>(
+  query: string,
+  instructions: string,
+  schemaDescription: string,
+  maxWebResults = 8
+): Promise<T | null> {
+  const fullInstructions =
+    `${instructions}\n\n` +
+    `After searching, respond with ONLY a single JSON object (no prose, no markdown fences) ` +
+    `matching this shape:\n${schemaDescription}`;
+  const text = await runWebSearch(query, fullInstructions, maxWebResults);
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(extractJson(text));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as T;
+    // A model that wrapped the object in a one-element array is a common,
+    // harmless deviation — unwrap it rather than discarding real research.
+    if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === "object") return parsed[0] as T;
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 // Models don't always honor "respond with ONLY a JSON array" literally —
@@ -311,18 +381,231 @@ export async function webSearchAndSummarize(query: string, instructions: string)
 // the whole pipeline run. Never let a malformed model response take down
 // the process — unwrap known wrapper shapes, otherwise treat it as "no
 // results found" rather than a fatal error.
-export function coerceToResultArray(value: unknown): WebSearchResultItem[] {
-  if (Array.isArray(value)) return value as WebSearchResultItem[];
+export function coerceToArray<T>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[];
   if (value && typeof value === "object") {
     for (const key of ["results", "items", "institutions", "data"]) {
       const candidate = (value as Record<string, unknown>)[key];
-      if (Array.isArray(candidate)) return candidate as WebSearchResultItem[];
+      if (Array.isArray(candidate)) return candidate as T[];
     }
   }
   console.warn(
-    "webSearchAndSummarize: model response was not a JSON array (and no known wrapper key matched) — " +
+    "web search: model response was not a JSON array (and no known wrapper key matched) — " +
       "treating as zero results instead of crashing. Raw parsed value:",
     JSON.stringify(value).slice(0, 500)
   );
   return [];
+}
+
+/** Back-compat alias kept because it is the name the existing test suite and
+ * services/search.ts already use; identical behavior, typed to the
+ * {title,url,snippet} shape. */
+export function coerceToResultArray(value: unknown): WebSearchResultItem[] {
+  return coerceToArray<WebSearchResultItem>(value);
+}
+
+// --- Agent 2 (Deep Research): per-institution grounded research ----------
+
+export interface InstitutionResearchInput {
+  /** Institution name exactly as discovery found it. */
+  name: string;
+  city?: string;
+  /** Anything Agent 1 already saw — official site, socials, the directory
+   * listing it was found on. Given to the model as starting points to open,
+   * NOT as facts to repeat back. */
+  knownLinks?: (string | null | undefined)[];
+}
+
+export interface InstitutionResearchResult {
+  /** The RawExtractedFields-shaped facts the model actually found. Typed
+   * loosely (Record) here because llm-client deliberately does no schema
+   * validation — the Researcher agent narrows/validates it. */
+  fields: Record<string, unknown>;
+  /** The URLs the model says it actually opened/used. Recorded as the
+   * evidence item's provenance and used as extra scrape targets. */
+  sourceUrls: string[];
+}
+
+const INSTITUTION_RESEARCH_SCHEMA = `{
+  "fields": {
+    "nameUz": string|null, "nameRu": string|null, "nameLatin": string|null,
+    "phone": string|null, "phone2": string|null, "email": string|null,
+    "website": string|null, "telegram": string|null, "instagram": string|null,
+    "city": string|null, "address": string|null,
+    "foundedYear": number|null, "studentCount": number|null, "teacherCount": number|null,
+    "languages": string[], "programs": string[], "shifts": string[], "specializations": string[],
+    "achievements": string|null,
+    "pricingNote": string|null,
+    "descriptionSourceText": string|null
+  },
+  "sourceUrls": string[]
+}`;
+
+/**
+ * Agent 2's primary source: one web-search-grounded research call scoped to
+ * a single named institution, returning the institution's "sales" facts.
+ *
+ * Why this exists (real production failure): real-mode research used to be
+ * a single naive fetch() + regex tag-strip of one discovery URL. Instagram/
+ * Telegram/Facebook serve login walls to that, modern JS sites serve an
+ * empty shell, and many Uzbek hosts 403 a non-browser user-agent — so
+ * `page.text` was empty for most candidates, the evidence array came out
+ * length 0, and every real run produced zero extracted fields and zero
+ * usable records. A search-grounded call reads what a human researcher
+ * would read (official site, socials, directory listings) and is therefore
+ * the primary path; the HTML scrape is now only supplementary.
+ *
+ * Returns null when the model produced nothing parseable — a normal "no
+ * evidence from this source" outcome, never a crash.
+ */
+export async function researchInstitutionViaWebSearch(
+  input: InstitutionResearchInput
+): Promise<InstitutionResearchResult | null> {
+  const links = (input.knownLinks ?? []).filter((l): l is string => !!l && l.trim().length > 0);
+  const query =
+    `Institution: "${input.name}"${input.city ? `, ${input.city}, Uzbekistan` : ", Uzbekistan"}.\n` +
+    (links.length > 0 ? `Known links to start from:\n${links.map((l) => `- ${l}`).join("\n")}\n` : "") +
+    `Research this ONE institution and report only what you actually find.`;
+
+  const instructions =
+    "You are a deep-research agent preparing a marketplace listing for ONE named education " +
+    "institution in Uzbekistan. Check, in this order: (1) the institution's official website, " +
+    "(2) its Instagram and Telegram pages, (3) Uzbekistan business directories yellowpages.uz and " +
+    "goldenpages.uz, which carry structured phone/address data that an institution's own site or " +
+    "social page often omits, (4) any other page that genuinely describes this institution. " +
+    "Most real institutions publish in Uzbek or Russian, not English — search in Uzbek and Russian " +
+    "too, and do not skip a source because it is not in English.\n\n" +
+    "Extract the facts that make this institution sellable to a student: contact details " +
+    "(phone, second phone, email, website, telegram, instagram), address and city, the programs/" +
+    "courses it actually offers, its specializations, teaching languages, class shifts, founding " +
+    "year, student and teacher counts, and any achievements/accreditations it genuinely claims. " +
+    "Put any price information you find (e.g. monthly fee ranges) in `pricingNote` as plain text " +
+    "quoting what the source says — do not convert or estimate.\n\n" +
+    "`descriptionSourceText` must be 2-5 factual sentences about this institution in its own terms, " +
+    "drawn from what the sources actually say — this is the raw material the content stage writes " +
+    "from, so it is the most important field: never leave it null when you found any real " +
+    "description of the institution.\n\n" +
+    "HARD RULE: every field you did not actually find must be null (or an empty array). Never " +
+    "invent or guess a phone number, address, founding year, count, program, price, or URL, and " +
+    "never carry over a fact from a DIFFERENT institution with a similar name. `sourceUrls` must " +
+    "list only URLs you actually opened and used.";
+
+  return webSearchStructuredObject<InstitutionResearchResult>(query, instructions, INSTITUTION_RESEARCH_SCHEMA);
+}
+
+// --- Provider error classification ---------------------------------------
+// Real production failure (the user's latest real run): an OpenRouter
+// `APIError: 402 This request would exceed your available credits` escaped
+// a single discovery search, propagated out of runWithConcurrency, and
+// killed the whole process with a raw stack trace mid-discovery — losing
+// the run and telling the user nothing actionable. Two things were wrong:
+// one failing search must not destroy a batch, and a credits/auth/rate-limit
+// error must read as a human-readable line, not a stack dump.
+//
+// classifyProviderError is a PURE function (no network, no SDK types) so it
+// is unit-testable offline — it reads `status`/`code` off whatever the SDK
+// threw and falls back to sniffing the message text, since different SDK
+// versions/providers surface the status differently.
+
+export type ProviderErrorKind = "auth" | "credits" | "rate_limit" | "other";
+
+export interface ProviderErrorInfo {
+  kind: ProviderErrorKind;
+  status: number | null;
+  /** True for errors that every subsequent call will hit identically (bad
+   * key, no credits). Burning the rest of a 200-institution batch against
+   * the same wall helps nobody — the caller stops the run instead. */
+  fatal: boolean;
+  /** One human-readable line naming the provider and the required action. */
+  message: string;
+}
+
+function statusFromError(err: unknown): number | null {
+  const e = err as { status?: unknown; statusCode?: unknown; response?: { status?: unknown }; message?: unknown };
+  for (const candidate of [e?.status, e?.statusCode, e?.response?.status]) {
+    if (typeof candidate === "number" && Number.isFinite(candidate)) return candidate;
+  }
+  const message = typeof e?.message === "string" ? e.message : "";
+  // SDK errors commonly stringify as "402 This request would exceed your
+  // available credits" or "Error code: 429 - ..." — read the status back out
+  // when it wasn't exposed as a field.
+  const match = message.match(/\b(401|402|403|429)\b/);
+  return match ? Number(match[1]) : null;
+}
+
+export function classifyProviderError(err: unknown): ProviderErrorInfo {
+  const provider = getProvider();
+  const providerLabel = provider === "openrouter" ? "OpenRouter" : "OpenAI";
+  const status = statusFromError(err);
+  const raw = (err as Error)?.message ?? String(err);
+  const topUpUrl = provider === "openrouter" ? "https://openrouter.ai/credits" : "https://platform.openai.com/settings/organization/billing";
+  const keyName = provider === "openrouter" ? "OPENROUTER_API_KEY" : "OPENAI_API_KEY";
+
+  if (status === 402 || /insufficient|exceed your available credits|quota/i.test(raw)) {
+    return {
+      kind: "credits",
+      status: status ?? 402,
+      fatal: true,
+      message:
+        `${providerLabel} returned ${status ?? 402}: out of credits — top up at ${topUpUrl}, ` +
+        `or switch SEARCH_PROVIDER (openai|openrouter). Stopping the run: every remaining ` +
+        `search/research call would fail the same way.`,
+    };
+  }
+  if (status === 401 || status === 403) {
+    return {
+      kind: "auth",
+      status,
+      fatal: true,
+      message:
+        `${providerLabel} returned ${status}: the API key was rejected — check ${keyName} ` +
+        `(and, for OpenRouter, that the key is allowed to use OPENROUTER_MODEL). Stopping the run: ` +
+        `every remaining call would fail the same way.`,
+    };
+  }
+  if (status === 429) {
+    return {
+      kind: "rate_limit",
+      status,
+      fatal: false,
+      message:
+        `${providerLabel} returned 429: rate limited — this unit of work is skipped and the run continues. ` +
+        `Lower PIPELINE_MAX_CONCURRENCY (currently applied from config/execution.json) if this repeats.`,
+    };
+  }
+  return {
+    kind: "other",
+    status,
+    fatal: false,
+    message: `${providerLabel} call failed${status ? ` (HTTP ${status})` : ""}: ${raw.slice(0, 300)}`,
+  };
+}
+
+/** Thrown to unwind out of a batch when classifyProviderError says the
+ * failure is fatal. Carries the already-formatted human-readable line, so
+ * cli.ts can print exactly that and exit non-zero without a stack dump. */
+export class FatalProviderError extends Error {
+  readonly info: ProviderErrorInfo;
+  constructor(info: ProviderErrorInfo) {
+    super(info.message);
+    this.name = "FatalProviderError";
+    this.info = info;
+  }
+}
+
+export function isFatalProviderError(err: unknown): err is FatalProviderError {
+  return err instanceof FatalProviderError;
+}
+
+/**
+ * Classifies `err`; returns the info for a non-fatal failure (caller logs a
+ * warning and moves on with zero results for that unit of work) and throws
+ * FatalProviderError for a fatal one (caller lets it unwind to cli.ts).
+ * MissingApiKeyError is passed straight through — cli.ts already prints it.
+ */
+export function handleProviderError(err: unknown): ProviderErrorInfo {
+  if (err instanceof MissingApiKeyError || err instanceof FatalProviderError) throw err;
+  const info = classifyProviderError(err);
+  if (info.fatal) throw new FatalProviderError(info);
+  return info;
 }

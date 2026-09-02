@@ -13,6 +13,17 @@
  *    reference export's 8-region coverage (e.g. Nukus/Qoraqalpog'iston)
  *  - runWithConcurrency caps in-flight work at `limit` and preserves order
  *  - llm-client's token usage accumulator sums input/output tokens per call
+ *  - real-mode evidence confidence varies with source kind, detail and
+ *    corroboration (the old hardcoded 0.6 pinned every real run at
+ *    sourceConfidence=52 and made APPROVED unreachable)
+ *  - a well-researched institution reaches APPROVED while a thin one stays
+ *    in NEEDS_REVIEW
+ *  - discovery maps a full search profile (website/socials/phone/address)
+ *    onto the candidate instead of just a link
+ *  - the content manager's "enough material" gate accepts any real fact set,
+ *    not only descriptionSourceText
+ *  - provider errors (401/402/403/429) are classified into one actionable
+ *    line, and only the genuinely fatal ones stop a run
  *
  * Run with: npm test  (== tsx test/run-all.ts)
  */
@@ -22,9 +33,31 @@ import { deterministicDedupe } from "../src/services/deduplicator.js";
 import { validateRecord } from "../src/services/validator.js";
 import { BilimOnExportRecordZ } from "../src/schemas/bilimon-export.zod.js";
 import { runWithConcurrency } from "../src/services/concurrency.js";
-import { getTokenUsage, resetTokenUsage, recordUsage, coerceToResultArray, getProvider, getModel, hasApiKey } from "../src/services/llm-client.js";
+import {
+  getTokenUsage,
+  resetTokenUsage,
+  recordUsage,
+  coerceToResultArray,
+  coerceToArray,
+  getProvider,
+  getModel,
+  hasApiKey,
+  classifyProviderError,
+  handleProviderError,
+  isFatalProviderError,
+} from "../src/services/llm-client.js";
 import { resolveBriefHeuristic, loadDefaultScope, resolveBrief } from "../src/services/brief-parser.js";
-import { discoverMock } from "../src/agents/discovery.js";
+import { discoverMock, mapSearchResultToCandidate } from "../src/agents/discovery.js";
+import { assessContentMaterial } from "../src/agents/content-manager.js";
+import { classifySourceUrl, normalizeResearchFields, scoreEvidenceItems } from "../src/agents/researcher.js";
+import {
+  computeDataCompleteness,
+  computeEvidenceConfidence,
+  computeSourceConfidence,
+  countCorroboratedFields,
+  scoreInstitution,
+} from "../src/services/scoring.js";
+import type { EvidenceItem, RawExtractedFields } from "../src/types/index.js";
 import { buildExportRecord } from "../src/agents/bilimon-exporter.js";
 import type { BilimOnExportRecord } from "../src/types/index.js";
 
@@ -550,6 +583,334 @@ console.log("10. coerceToResultArray never lets a malformed LLM response crash t
   assert(JSON.stringify(coerceToResultArray({})) === "[]", "an empty object coerces to [] instead of crashing");
   assert(JSON.stringify(coerceToResultArray(null)) === "[]", "null coerces to []");
   assert(JSON.stringify(coerceToResultArray("not json-shaped")) === "[]", "a bare string coerces to []");
+}
+
+
+console.log("11. Real-mode evidence confidence reflects the evidence (the 'confidence=52 forever' bug)");
+{
+  // Real production bug: agents/researcher.ts hardcoded confidence: 0.6 on
+  // every real-mode evidence item, and the evidence array was never longer
+  // than 1 (one URL, scrape-only). computeSourceConfidence(1, 0.6) is
+  // exactly 52 — which is what every single one of the user's real run logs
+  // showed — and with ~55 completeness and the 50/50 weights in
+  // config/thresholds.json, qualityScore landed ~54 against an APPROVED
+  // threshold of 85. APPROVED was mathematically unreachable in real mode.
+  assert(
+    computeSourceConfidence(1, 0.6) === 52,
+    `the old constant really did pin sourceConfidence at 52 (got ${computeSourceConfidence(1, 0.6)})`
+  );
+
+  const richFields: Partial<RawExtractedFields> = {
+    phone: "+998901234567",
+    address: "Amir Temur ko'chasi 15",
+    website: "https://example-lc.uz",
+    email: "info@example-lc.uz",
+    programs: ["General English", "IELTS Preparation"],
+    foundedYear: 2015,
+  };
+  const thinFields: Partial<RawExtractedFields> = { website: "https://example-lc.uz" };
+
+  const richConf = computeEvidenceConfidence({ sourceType: "website", fields: richFields });
+  const thinConf = computeEvidenceConfidence({ sourceType: "website", fields: thinFields });
+  assert(richConf > thinConf, `a source that yielded real detail outranks one that yielded a bare link (${richConf} > ${thinConf})`);
+  assert(richConf !== 0.6 && thinConf !== 0.6, "confidence is no longer the constant 0.6");
+
+  const socialConf = computeEvidenceConfidence({ sourceType: "social", fields: richFields });
+  const directoryConf = computeEvidenceConfidence({ sourceType: "directory", fields: richFields });
+  assert(
+    richConf > directoryConf && directoryConf > socialConf,
+    `source kind is ranked website > directory > social (${richConf} > ${directoryConf} > ${socialConf})`
+  );
+
+  const corroborated = computeEvidenceConfidence({ sourceType: "website", fields: richFields, corroboratedFieldCount: 2 });
+  assert(corroborated > richConf, `corroboration by another source raises confidence (${corroborated} > ${richConf})`);
+  assert(corroborated <= 0.95, `confidence is capped below certainty — nothing here is human-verified (got ${corroborated})`);
+
+  // countCorroboratedFields compares identifying facts, tolerating the
+  // formatting differences real sources actually have.
+  const agree = countCorroboratedFields(
+    { phone: "+998 90 123 45 67", website: "https://example-lc.uz/", address: "Amir Temur 15" },
+    [{ phone: "901234567", website: "http://www.example-lc.uz", address: "Chilonzor 4" }]
+  );
+  assert(agree === 2, `phone and website corroborate across formatting differences, the differing address does not (got ${agree})`);
+  assert(
+    countCorroboratedFields({ phone: "+998901234567" }, []) === 0,
+    "a single source corroborates nothing on its own"
+  );
+
+  // scoreEvidenceItems wires the two together over a whole evidence array.
+  const items: Omit<EvidenceItem, "confidence">[] = [
+    { fetchedAt: "t", sourceUrl: "research://x", sourceType: "search", extractedFields: richFields },
+    { fetchedAt: "t", sourceUrl: "https://example-lc.uz", sourceType: "website", extractedFields: richFields },
+  ];
+  const scored = scoreEvidenceItems(items);
+  assert(scored.length === 2 && scored.every((e) => e.confidence > 0.6), "every item in a corroborating pair scores above the old constant");
+  assert(
+    scored[1].confidence > scored[0].confidence,
+    "within the same fact set, the institution's own website outranks the search summary"
+  );
+}
+
+console.log("11b. A well-researched institution can now actually reach APPROVED, a thin one lands in NEEDS_REVIEW");
+{
+  const wellResearched: RawExtractedFields = {
+    nameUz: "Example Learning Center",
+    city: "Tashkent",
+    address: "Amir Temur ko'chasi 15",
+    phone: "+998901234567",
+    email: "info@example-lc.uz",
+    website: "https://example-lc.uz",
+    telegram: "https://t.me/example_lc",
+    instagram: "https://instagram.com/example.lc",
+    type: "LANGUAGE_CENTER",
+    categories: ["LANGUAGES"],
+    deliveryMode: "OFFLINE",
+    programs: ["General English", "IELTS Preparation"],
+    specializations: ["IELTS"],
+    foundedYear: 2015,
+    descriptionSourceText: "x".repeat(120),
+  };
+  const evidence = scoreEvidenceItems([
+    { fetchedAt: "t", sourceUrl: "research://x", sourceType: "search", extractedFields: wellResearched },
+    { fetchedAt: "t", sourceUrl: "https://example-lc.uz", sourceType: "website", extractedFields: wellResearched },
+    {
+      fetchedAt: "t",
+      sourceUrl: "https://yellowpages.uz/example-lc",
+      sourceType: "directory",
+      extractedFields: { phone: wellResearched.phone, address: wellResearched.address, website: wellResearched.website },
+    },
+  ]);
+  const best = Math.max(...evidence.map((e) => e.confidence));
+  const richScore = scoreInstitution({
+    id: "rich",
+    nameKey: "example learning center",
+    slug: "example-learning-center",
+    fields: wellResearched,
+    evidenceCount: evidence.length,
+    bestSourceConfidence: best,
+  });
+  assert(
+    richScore.status === "APPROVED",
+    `a website+socials+phone+address+programs institution reaches APPROVED (quality=${richScore.qualityScore} confidence=${richScore.sourceConfidence} completeness=${richScore.dataCompleteness})`
+  );
+
+  const thinFields: RawExtractedFields = {
+    nameLatin: "Thin Center",
+    city: "Tashkent",
+    phone: "+998907654321",
+    website: "https://thin-center.uz",
+    type: "COURSE_CENTER",
+    categories: ["LANGUAGES"],
+  };
+  const thinEvidence = scoreEvidenceItems([
+    { fetchedAt: "t", sourceUrl: "research://thin", sourceType: "search", extractedFields: thinFields },
+  ]);
+  const thinScore = scoreInstitution({
+    id: "thin",
+    nameKey: "thin center",
+    slug: "thin-center",
+    fields: thinFields,
+    evidenceCount: thinEvidence.length,
+    bestSourceConfidence: thinEvidence[0].confidence,
+  });
+  assert(
+    thinScore.status === "NEEDS_REVIEW",
+    `a single-source, contact-only institution still lands in NEEDS_REVIEW, not APPROVED (quality=${thinScore.qualityScore})`
+  );
+  assert(
+    computeDataCompleteness(wellResearched) > computeDataCompleteness(thinFields),
+    "completeness still separates the two on data, independently of confidence"
+  );
+}
+
+console.log("12. Discovery maps a full search profile onto the candidate (website/socials/phone/address)");
+{
+  // Real production bug: live discovery mapped only {title,url,snippet} onto
+  // a candidate, so website/telegram/instagram/phone stayed empty in real
+  // mode (only mock fixtures ever set them) and the orchestrator's
+  // "fill in from discovery" fallback had nothing to fall back on.
+  const candidate = mapSearchResultToCandidate(
+    {
+      title: "Example LC",
+      name: "Example Learning Center",
+      url: "https://yellowpages.uz/example-lc",
+      snippet: "Til markazi",
+      website: "https://example-lc.uz",
+      instagram: "https://instagram.com/example.lc",
+      telegram: "@example_lc",
+      facebook: null,
+      phone: "+998901234567",
+      address: "Amir Temur ko'chasi 15",
+      city: "Toshkent",
+      category: "LANGUAGES",
+      type: "LANGUAGE_CENTER",
+    },
+    "Tashkent",
+    "2026-01-01T00:00:00.000Z"
+  );
+  assert(candidate.website === "https://example-lc.uz", "website from the search profile reaches the candidate");
+  assert(candidate.instagram === "https://instagram.com/example.lc", "instagram reaches the candidate");
+  assert(candidate.telegram === "@example_lc", "telegram reaches the candidate (handle form is kept as-is)");
+  assert(candidate.phone === "+998901234567", "phone reaches the candidate");
+  assert(candidate.address === "Amir Temur ko'chasi 15", "address reaches the candidate");
+  assert(candidate.rawName === "Example Learning Center", "the institution's own name wins over the search-result title");
+  assert(candidate.city === "Toshkent", "a city stated by the source wins over the city the search was run for");
+  assert(candidate.category === "LANGUAGES" && candidate.type === "LANGUAGE_CENTER", "the search facet is carried through");
+
+  const sparse = mapSearchResultToCandidate(
+    { title: "Bare Result", url: "https://example.uz", website: "   ", instagram: null },
+    "Samarkand"
+  );
+  assert(sparse.rawName === "Bare Result", "title is used when no separate name field came back");
+  assert(sparse.city === "Samarkand", "the searched city is the fallback when the source states none");
+  assert(sparse.website === null, "a blank string field is normalized to null, never a fake empty value");
+  assert(sparse.instagram === null && sparse.phone === null, "absent fields stay null rather than undefined-ish junk");
+}
+
+console.log("13. Content manager generates from any real fact set, not descriptionSourceText alone");
+{
+  // Real production bug: the live path returned null descriptions unless
+  // descriptionSourceText was >= 40 chars, and that field only ever came
+  // from the extractor running on scraped text — which was empty for most
+  // real institutions. Content was therefore almost always null, which also
+  // flagged the record for review.
+  const noSourceTextButRealFacts: RawExtractedFields = {
+    nameUz: "Example Learning Center",
+    city: "Tashkent",
+    type: "LANGUAGE_CENTER",
+    programs: ["General English", "IELTS Preparation"],
+    foundedYear: 2015,
+  };
+  const ok = assessContentMaterial(noSourceTextButRealFacts);
+  assert(ok.sufficient, `name + city + type + programs + foundedYear is enough material (reason: ${ok.reason ?? "-"})`);
+  assert(ok.facts.includes("programs") && ok.facts.includes("foundedYear"), "the assessment names the facts it found");
+
+  const sourceTextOnly = assessContentMaterial({
+    nameLatin: "Example LC",
+    city: "Tashkent",
+    categories: ["LANGUAGES"],
+    descriptionSourceText: "Ushbu markaz 2015-yildan beri ingliz tili kurslarini olib boradi.",
+  });
+  assert(sourceTextOnly.sufficient, "real source text alone still qualifies, exactly as before");
+
+  const tooThin = assessContentMaterial({ nameLatin: "Example LC", city: "Tashkent", categories: ["LANGUAGES"] });
+  assert(!tooThin.sufficient, "a name and a city alone are still too thin to write from");
+  assert(!!tooThin.reason && tooThin.reason.includes("substantive"), `the reason says what was missing (got "${tooThin.reason}")`);
+
+  const noIdentity = assessContentMaterial({ city: "Tashkent", programs: ["A"], foundedYear: 2015 });
+  assert(!noIdentity.sufficient, "facts with no institution name are not writable material");
+  assert(!!noIdentity.reason && noIdentity.reason.includes("a name"), "the reason names the missing identity");
+
+  const noPlace = assessContentMaterial({ nameUz: "X", type: "SCHOOL", programs: ["A"], foundedYear: 2015 });
+  assert(!noPlace.sufficient, "facts with no city or address are not writable material");
+}
+
+console.log("14. Provider errors are classified into one actionable line instead of a stack trace");
+{
+  // Real production crash: the user's last real run died on an unhandled
+  // OpenRouter "APIError: 402 This request would exceed your available
+  // credits" thrown by ONE discovery search, printing a giant stack trace
+  // and killing the whole batch mid-discovery.
+  const saved = { SEARCH_PROVIDER: process.env.SEARCH_PROVIDER, OPENROUTER_MODEL: process.env.OPENROUTER_MODEL };
+  try {
+    process.env.SEARCH_PROVIDER = "openrouter";
+
+    const credits = classifyProviderError(
+      Object.assign(new Error("402 This request would exceed your available credits"), { status: 402 })
+    );
+    assert(credits.kind === "credits" && credits.fatal, "a 402 is classified as fatal 'credits'");
+    assert(
+      credits.message.includes("OpenRouter") && credits.message.includes("402") && credits.message.includes("openrouter.ai/credits"),
+      `the 402 message names the provider, the status and the top-up URL (got "${credits.message}")`
+    );
+    assert(
+      credits.message.includes("SEARCH_PROVIDER"),
+      "the 402 message also points at switching SEARCH_PROVIDER as the alternative"
+    );
+
+    // Not every SDK surfaces the status as a field — the classifier reads it
+    // back out of the message text too.
+    const creditsFromText = classifyProviderError(new Error("Error code: 402 - insufficient credits"));
+    assert(creditsFromText.kind === "credits" && creditsFromText.status === 402, "a 402 is recognized from the message text alone");
+
+    const auth = classifyProviderError(Object.assign(new Error("401 Unauthorized"), { status: 401 }));
+    assert(auth.kind === "auth" && auth.fatal, "a 401 is classified as fatal 'auth'");
+    assert(auth.message.includes("OPENROUTER_API_KEY"), "the auth message names the env var to check for the active provider");
+
+    const forbidden = classifyProviderError(Object.assign(new Error("forbidden"), { status: 403 }));
+    assert(forbidden.kind === "auth" && forbidden.fatal, "a 403 is also fatal auth");
+
+    const rate = classifyProviderError(Object.assign(new Error("429 Too Many Requests"), { status: 429 }));
+    assert(rate.kind === "rate_limit" && !rate.fatal, "a 429 is rate_limit and NOT fatal — the run continues without that unit of work");
+
+    const other = classifyProviderError(new Error("socket hang up"));
+    assert(other.kind === "other" && !other.fatal, "an ordinary network error is non-fatal");
+    assert(other.message.includes("socket hang up"), "the ordinary-error message keeps the underlying cause");
+
+    // handleProviderError is the boundary helper callers actually use.
+    let threw: unknown = null;
+    try {
+      handleProviderError(Object.assign(new Error("402 credits"), { status: 402 }));
+    } catch (err) {
+      threw = err;
+    }
+    assert(isFatalProviderError(threw), "handleProviderError throws FatalProviderError for a fatal failure so the run can stop cleanly");
+    assert(
+      (threw as Error).message.includes("out of credits"),
+      "the thrown error carries the already-formatted human-readable line"
+    );
+
+    const survived = handleProviderError(new Error("ECONNRESET"));
+    assert(survived.kind === "other", "handleProviderError returns (does not throw) for a recoverable failure, so one unit of work fails alone");
+
+    process.env.SEARCH_PROVIDER = "openai";
+    const openaiCredits = classifyProviderError(Object.assign(new Error("402"), { status: 402 }));
+    assert(
+      openaiCredits.message.includes("OpenAI") && !openaiCredits.message.includes("openrouter.ai/credits"),
+      "the message names whichever provider is actually configured"
+    );
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+console.log("15. Researcher normalizes model output and classifies sources without inventing anything");
+{
+  const normalized = normalizeResearchFields({
+    nameUz: "  Example Learning Center  ",
+    phone: null,
+    website: "",
+    foundedYear: "2015",
+    studentCount: 0,
+    programs: ["General English", "", "  IELTS  "],
+    specializations: [],
+    achievements: null,
+    pricingNote: "oyiga 500 000 so'mdan",
+    notAField: "ignored",
+  });
+  assert(normalized.nameUz === "Example Learning Center", "string fields are trimmed");
+  assert(!("phone" in normalized) && !("website" in normalized), "null and empty-string fields are dropped, never stored as fake values");
+  assert(normalized.foundedYear === 2015, "a numeric field returned as a string is coerced");
+  assert(!("studentCount" in normalized), "a zero count is dropped rather than exported as a real 0");
+  assert(JSON.stringify(normalized.programs) === JSON.stringify(["General English", "IELTS"]), "array entries are trimmed and blanks removed");
+  assert(!("specializations" in normalized), "an empty array is dropped rather than looking like a checked-and-empty answer");
+  assert(normalized.pricingNote === "oyiga 500 000 so'mdan", "a free-text price hint is kept verbatim (never converted to numbers)");
+  assert(!("notAField" in normalized), "unknown keys from the model are discarded");
+  assert(JSON.stringify(normalizeResearchFields(null)) === "{}", "a null research result normalizes to no fields at all");
+
+  assert(classifySourceUrl("https://instagram.com/example.lc") === "social", "instagram is classified as a social source");
+  assert(classifySourceUrl("https://t.me/example_lc") === "social", "telegram is classified as a social source");
+  assert(classifySourceUrl("https://yellowpages.uz/example") === "directory", "yellowpages.uz is classified as a directory");
+  assert(classifySourceUrl("https://goldenpages.uz/example") === "directory", "goldenpages.uz is classified as a directory");
+  assert(classifySourceUrl("https://example-lc.uz/about") === "website", "an ordinary site is classified as a website");
+
+  // The generalized array coercion still protects every structured search
+  // call, not just the old {title,url,snippet} one.
+  assert(JSON.stringify(coerceToArray<{ name: string }>({ institutions: [{ name: "a" }] })) === JSON.stringify([{ name: "a" }]), "coerceToArray unwraps a wrapper object for any element shape");
+  assert(JSON.stringify(coerceToArray({})) === "[]", "coerceToArray degrades to [] rather than throwing");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

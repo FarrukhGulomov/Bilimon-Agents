@@ -13,12 +13,13 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { searchInstitutions } from "../services/search.js";
+import { searchInstitutions, type DiscoverySearchResult } from "../services/search.js";
 import { listCities } from "../services/location-mapper.js";
 import { loadDefaultScope, type DiscoveryScope } from "../services/brief-parser.js";
 import { runWithConcurrency } from "../services/concurrency.js";
 import { loadExecutionConfig } from "../services/execution-config.js";
 import { CATEGORIES, type InstitutionType, type Category } from "../schemas/enums.js";
+import { isFatalProviderError } from "../services/llm-client.js";
 import type { DiscoveredInstitution } from "../types/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -40,6 +41,17 @@ export interface MockDiscoveryEntry {
   sourceUrl: string;
 }
 
+/**
+ * A discovered institution plus the contact profile Agent 1 saw while
+ * finding it. Real production failure: in live mode only `rawName`/
+ * `sourceUrl`/`city`/`category` were ever populated — the website/telegram/
+ * instagram/phone fields below existed but were set by the mock fixtures
+ * ONLY, so the spec's "Agent 1 also finds their websites and social-network
+ * addresses" was simply not implemented. services/search.ts now returns a
+ * per-institution profile and mapSearchResultToCandidate() below carries all
+ * of it onto the candidate, where the orchestrator's existing
+ * "fill in from discovery if research didn't supply it" block picks it up.
+ */
 export interface DiscoveryCandidate extends DiscoveredInstitution {
   fixtureId?: string; // present only in mock mode, used to join with mock-research.json
   type?: string; // present in mock mode; real mode leaves type resolution to the researcher/extractor
@@ -47,6 +59,49 @@ export interface DiscoveryCandidate extends DiscoveredInstitution {
   website?: string | null;
   telegram?: string | null;
   instagram?: string | null;
+  /** Facebook page, if Agent 1 saw one. Not a BilimOn export field (the real
+   * schema has no facebook column) — kept as a research starting point for
+   * Agent 2, never exported. */
+  facebook?: string | null;
+  address?: string | null;
+}
+
+/**
+ * Maps one live search result onto a DiscoveryCandidate. Pure and exported
+ * so the mapping is testable offline without a network call.
+ *
+ * `searchedCity` is the city the search was run for; a city the source
+ * itself states wins over it, since a directory listing knows better than
+ * the query does. Empty strings are normalized to null so a blank model
+ * field never looks like a real value downstream.
+ */
+export function mapSearchResultToCandidate(
+  result: DiscoverySearchResult,
+  searchedCity: string,
+  discoveredAt: string = new Date().toISOString()
+): DiscoveryCandidate {
+  const clean = (v: string | null | undefined): string | null => {
+    const trimmed = typeof v === "string" ? v.trim() : "";
+    return trimmed.length > 0 ? trimmed : null;
+  };
+  const name = clean(result.name) ?? clean(result.title) ?? "";
+  return {
+    discoveryId: `${result.url}`,
+    rawName: name,
+    city: clean(result.city) ?? searchedCity,
+    category: result.category,
+    type: result.type,
+    sourceUrl: result.url,
+    sourceType: "web_search",
+    notes: clean(result.snippet) ?? undefined,
+    phone: clean(result.phone),
+    website: clean(result.website),
+    telegram: clean(result.telegram),
+    instagram: clean(result.instagram),
+    facebook: clean(result.facebook),
+    address: clean(result.address),
+    discoveredAt,
+  };
 }
 
 export function loadMockDiscoveryFixture(): MockDiscoveryEntry[] {
@@ -168,11 +223,16 @@ export async function discoverLive(
   const { maxConcurrency } = loadExecutionConfig();
   const results: DiscoveryCandidate[] = [];
   let searchesStarted = 0;
+  // Set when a search hits a fatal provider error (bad key / no credits).
+  // Every remaining search would fail identically, so stop pulling new work
+  // and rethrow once the in-flight searches have settled — cli.ts turns this
+  // into one clear line and a non-zero exit instead of a stack dump.
+  let fatal: unknown = null;
 
   await runWithConcurrency({
     items: units,
     limit: maxConcurrency,
-    shouldStop: () => results.length >= count,
+    shouldStop: () => fatal !== null || results.length >= count,
     worker: async ({ facet, city }) => {
       const n = ++searchesStarted;
       console.log(
@@ -180,22 +240,26 @@ export async function discoverLive(
           (facet.category ? ` category=${facet.category}` : "") +
           (facet.type ? ` type=${facet.type}` : "")
       );
-      const found = await searchInstitutions(city.nameEn, facet.category, facet.type);
+      let found: DiscoverySearchResult[] = [];
+      try {
+        found = await searchInstitutions(city.nameEn, facet.category, facet.type);
+      } catch (err) {
+        // searchInstitutions already swallows ordinary failures; anything
+        // reaching here is fatal (or a MissingApiKeyError). Record it and
+        // let the batch wind down rather than throwing out of
+        // runWithConcurrency mid-flight, which is exactly how the user's
+        // last real run died.
+        if (fatal === null) fatal = err;
+        if (!isFatalProviderError(err)) throw err;
+        return;
+      }
       for (const f of found) {
-        results.push({
-          discoveryId: `${f.url}`,
-          rawName: f.title,
-          city: city.nameEn,
-          category: facet.category,
-          type: facet.type,
-          sourceUrl: f.url,
-          sourceType: "web_search",
-          notes: f.snippet,
-          discoveredAt: new Date().toISOString(),
-        });
+        results.push(mapSearchResultToCandidate(f, city.nameEn));
       }
     },
   });
+
+  if (fatal !== null) throw fatal;
 
   // Concurrent workers can overshoot `count` slightly (multiple in-flight
   // searches settling around the same time, each potentially returning
