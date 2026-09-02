@@ -59,6 +59,7 @@ import {
 } from "../src/services/scoring.js";
 import type { EvidenceItem, RawExtractedFields } from "../src/types/index.js";
 import { buildExportRecord } from "../src/agents/bilimon-exporter.js";
+import { resolveExportIdentity } from "../src/agents/orchestrator.js";
 import type { BilimOnExportRecord } from "../src/types/index.js";
 
 const REAL_TASHKENT_CITY_ID = "cmrfw8t3y000fn3og703hdh1a";
@@ -523,6 +524,29 @@ console.log("9c. buildExportRecord: a genuinely missing phone is legal (real dat
 
   const goodPhone = buildExportRecord("id3", "slug", "namekey", { ...baseFields, phone: "+998712000004" }, baseContent);
   assert(goodPhone.record?.phone === "+998712000004", "a valid supplied phone is still normalized and kept");
+}
+
+console.log("9g. exported nameKey/slug come from the resolved name, not the raw discovery-time name");
+{
+  // Real production bug (Railway, 2026-09-02): a live search result's
+  // "name" was the generic facet label "til markazi" ("language center")
+  // rather than the real institution name, and nameKey/slug were computed
+  // from it once at discovery time and never revisited. Every institution
+  // matching that generic label would have exported the identical
+  // "til-markazi-tashkent" slug, colliding on import.
+  const generic = resolveExportIdentity(
+    { nameUz: "Til ta\u2019limi va konsalting markazi", city: "Tashkent" } as any,
+    { rawName: "Til markazi", city: "Tashkent" }
+  );
+  assert(generic.nameKey !== "til markazi", `nameKey is NOT the generic facet label once a real name is known (got "${generic.nameKey}")`);
+  assert(generic.slug !== "til-markazi-tashkent", `slug is NOT the generic collision-prone value once a real name is known (got "${generic.slug}")`);
+  assert(generic.slug.startsWith("til-ta"), `slug is derived from the actual resolved institution name (got "${generic.slug}")`);
+
+  // When research found no better name at all, the raw discovery name is
+  // still the correct fallback (matches the existing nameUz/nameLatin
+  // fallback behavior already in the orchestrator).
+  const noResearchName = resolveExportIdentity({ city: "Tashkent" } as any, { rawName: "Cambridge Learning Center", city: "Tashkent" });
+  assert(noResearchName.slug === "cambridge-learning-center-tashkent", `falls back to the raw discovery name when research found none better (got "${noResearchName.slug}")`);
 }
 
 console.log("9f. languages are normalized to BilimOn ISO codes, not passed through as source-language names");
