@@ -27,6 +27,7 @@
  *
  * Run with: npm test  (== tsx test/run-all.ts)
  */
+import { readFileSync } from "node:fs";
 import { slugify, normalizePhone, generateId, normalizeNameKey, normalizeLanguages } from "../src/services/normalizer.js";
 import { resolveCity } from "../src/services/location-mapper.js";
 import { deterministicDedupe } from "../src/services/deduplicator.js";
@@ -58,7 +59,7 @@ import {
   scoreInstitution,
 } from "../src/services/scoring.js";
 import type { EvidenceItem, RawExtractedFields } from "../src/types/index.js";
-import { buildExportRecord } from "../src/agents/bilimon-exporter.js";
+import { buildExportRecord, exportFinalArtifacts } from "../src/agents/bilimon-exporter.js";
 import { resolveExportIdentity } from "../src/agents/orchestrator.js";
 import type { BilimOnExportRecord } from "../src/types/index.js";
 
@@ -524,6 +525,21 @@ console.log("9c. buildExportRecord: a genuinely missing phone is legal (real dat
 
   const goodPhone = buildExportRecord("id3", "slug", "namekey", { ...baseFields, phone: "+998712000004" }, baseContent);
   assert(goodPhone.record?.phone === "+998712000004", "a valid supplied phone is still normalized and kept");
+}
+
+console.log("9h. bilimon-import.json is wrapped {version, exportedAt, institutions: [...]}, not a bare array");
+{
+  // Real production bug: the user pasted back the actual reference file's
+  // shape ({version, exportedAt, institutions: [...]}) after our export
+  // produced a bare top-level array instead — every record inside matched
+  // the real schema, but the file itself didn't look like a real BilimOn
+  // export/import file at all.
+  const { importPath } = exportFinalArtifacts();
+  const written = JSON.parse(readFileSync(importPath, "utf-8"));
+  assert(!Array.isArray(written), "bilimon-import.json's top level is an object, not a bare array");
+  assert(typeof written.version === "number", `"version" is present and numeric (got ${JSON.stringify(written.version)})`);
+  assert(typeof written.exportedAt === "string" && !Number.isNaN(Date.parse(written.exportedAt)), `"exportedAt" is a valid ISO timestamp string (got ${JSON.stringify(written.exportedAt)})`);
+  assert(Array.isArray(written.institutions), '"institutions" holds the actual records array');
 }
 
 console.log("9g. exported nameKey/slug come from the resolved name, not the raw discovery-time name");

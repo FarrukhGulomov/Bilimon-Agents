@@ -217,6 +217,25 @@ export interface BilimOnExportRecord {
   branches: BranchRecord[];
 }
 
+/**
+ * The envelope bilimon-import.json must actually be written in.
+ *
+ * CONFIRMED against data/reference/bilimon-institutions-reference.json (the
+ * real BilimOn production export the user supplied): its top level is
+ * `{version, exportedAt, institutions: [...]}`, NOT a bare array. Real
+ * production bug: bilimon-exporter.ts used to write `approvedRecords`
+ * directly as a top-level JSON array — every record inside it matched the
+ * real schema, but the file itself was not shaped like a real BilimOn
+ * export/import file at all, which the user caught by pasting the actual
+ * reference file's shape back for comparison. `version` is a plain
+ * integer (1 in the reference file, not a semver string).
+ */
+export interface BilimOnImportFile {
+  version: number;
+  exportedAt: string;
+  institutions: BilimOnExportRecord[];
+}
+
 export interface ValidationResult {
   valid: boolean;
   reasons: string[];

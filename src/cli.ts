@@ -130,7 +130,10 @@ function cmdValidate() {
   const importFile = join(EXPORT_DIR, "bilimon-import.json");
   let records: BilimOnExportRecord[] = [];
   if (existsSync(importFile)) {
-    records = JSON.parse(readFileSync(importFile, "utf-8"));
+    // bilimon-import.json is {version, exportedAt, institutions: [...]},
+    // not a bare array — see BilimOnImportFile in src/types/index.ts.
+    const parsed = JSON.parse(readFileSync(importFile, "utf-8"));
+    records = Array.isArray(parsed) ? parsed : (parsed.institutions ?? []);
   } else if (existsSync(PROCESSED_DIR)) {
     records = readdirSync(PROCESSED_DIR)
       .filter((f) => f.endsWith(".json"))
