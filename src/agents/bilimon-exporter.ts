@@ -16,7 +16,7 @@ import type {
 } from "../types/index.js";
 import type { ContentResult } from "./content-manager.js";
 import { resolveCity } from "../services/location-mapper.js";
-import { normalizePhone, normalizeUrl } from "../services/normalizer.js";
+import { normalizePhone, normalizeUrl, normalizeLanguages } from "../services/normalizer.js";
 import { getTokenUsage } from "../services/llm-client.js";
 import { readLastScope } from "../services/scope-store.js";
 
@@ -125,7 +125,10 @@ export function buildExportRecord(
       foundedYear: fields.foundedYear ?? null,
       studentCount: fields.studentCount ?? null,
       teacherCount: fields.teacherCount ?? null,
-      languages: fields.languages ?? [],
+      // Normalized, not passed through: live extraction returns whatever the
+      // source page writes ("Узбекский", "Ingliz tili", ...) while the real
+      // BilimOn export uses uz/ru/en/de codes. See normalizeLanguages().
+      languages: normalizeLanguages(fields.languages),
       programs: fields.programs ?? [],
       shifts: fields.shifts ?? [],
       specializations: fields.specializations ?? [],

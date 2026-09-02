@@ -27,7 +27,7 @@
  *
  * Run with: npm test  (== tsx test/run-all.ts)
  */
-import { slugify, normalizePhone, generateId, normalizeNameKey } from "../src/services/normalizer.js";
+import { slugify, normalizePhone, generateId, normalizeNameKey, normalizeLanguages } from "../src/services/normalizer.js";
 import { resolveCity } from "../src/services/location-mapper.js";
 import { deterministicDedupe } from "../src/services/deduplicator.js";
 import { validateRecord } from "../src/services/validator.js";
@@ -523,6 +523,59 @@ console.log("9c. buildExportRecord: a genuinely missing phone is legal (real dat
 
   const goodPhone = buildExportRecord("id3", "slug", "namekey", { ...baseFields, phone: "+998712000004" }, baseContent);
   assert(goodPhone.record?.phone === "+998712000004", "a valid supplied phone is still normalized and kept");
+}
+
+console.log("9f. languages are normalized to BilimOn ISO codes, not passed through as source-language names");
+{
+  // Real production failure (Railway, 2026-09-02): a candidate that had
+  // ALREADY passed the quality gate (confidence 93, completeness 73) was
+  // dropped to NEEDS_REVIEW solely because live extraction returned
+  // details.languages as ["Узбекский", "Русский", "Английский"] — the names
+  // as the source page writes them — instead of the uz/ru/en codes the real
+  // BilimOn export uses.
+  assert(
+    JSON.stringify(normalizeLanguages(["Узбекский", "Русский", "Английский"])) === JSON.stringify(["uz", "ru", "en"]),
+    `the exact real-world failing value normalizes to ISO codes (got ${JSON.stringify(normalizeLanguages(["Узбекский", "Русский", "Английский"]))})`
+  );
+  assert(
+    JSON.stringify(normalizeLanguages(["O'zbek tili", "Ingliz tili", "Nemis tili"])) === JSON.stringify(["uz", "en", "de"]),
+    "Uzbek-language names normalize too"
+  );
+  assert(
+    JSON.stringify(normalizeLanguages(["uz", "ru", "uz"])) === JSON.stringify(["uz", "ru"]),
+    "already-correct codes pass through and duplicates collapse"
+  );
+  assert(JSON.stringify(normalizeLanguages(null)) === "[]", "null/absent languages become an empty array");
+  assert(
+    JSON.stringify(normalizeLanguages(["Klingon"])) === JSON.stringify(["klingon"]),
+    "an unrecognized language is lowercased and kept for the validator to soft-flag, not silently dropped"
+  );
+
+  // Mirrors the real failing record: everything else valid, languages in
+  // source-language names — so this isolates the language format as the
+  // single reason the real run was rejected.
+  const langContent = {
+    descriptionUz: "Toshkentdagi maktab, ingliz tili va maktab fanlari bo'yicha darslar mavjud.",
+    descriptionRu: "Школа в Ташкенте с занятиями по английскому языку и школьным предметам.",
+    needsContentReview: false,
+  };
+  const built = buildExportRecord(
+    "idlang", "slug", "namekey",
+    {
+      nameLatin: "Bunker School 2",
+      city: "Tashkent",
+      type: "SCHOOL",
+      categories: ["SCHOOL_SUBJECTS"],
+      languages: ["Узбекский", "Русский", "Английский"],
+    } as any,
+    langContent
+  );
+  assert(
+    JSON.stringify(built.record?.details.languages) === JSON.stringify(["uz", "ru", "en"]),
+    "buildExportRecord applies the normalization end-to-end, so the record now passes validation"
+  );
+  const validation = validateRecord(built.record!);
+  assert(validation.valid, `the rebuilt record validates cleanly (reasons: ${JSON.stringify(validation.reasons)})`);
 }
 
 console.log("9d. buildExportRecord normalizes a bare-domain website instead of rejecting it downstream");
