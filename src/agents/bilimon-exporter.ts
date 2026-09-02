@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type {
   BilimOnExportRecord,
+  BilimOnImportFile,
   ExportReport,
   RawExtractedFields,
   StateRecord,
@@ -198,8 +199,19 @@ export function exportFinalArtifacts(): { importPath: string; reportPath: string
     }
   }
 
+  // Real production bug: this used to write `approvedRecords` directly as a
+  // bare top-level array. Every record inside matched the real schema, but
+  // the FILE ITSELF didn't match a real BilimOn export/import file, whose
+  // top level is {version, exportedAt, institutions: [...]} — confirmed
+  // against data/reference/bilimon-institutions-reference.json (see
+  // BilimOnImportFile in src/types/index.ts). Wrap it the same way.
+  const importFile: BilimOnImportFile = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    institutions: approvedRecords,
+  };
   const importPath = join(EXPORT_DIR, "bilimon-import.json");
-  writeFileSync(importPath, JSON.stringify(approvedRecords, null, 2), "utf-8");
+  writeFileSync(importPath, JSON.stringify(importFile, null, 2), "utf-8");
 
   const report: ExportReport = {
     totalDiscovered: states.length,

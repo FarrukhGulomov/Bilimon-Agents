@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import type { PipelineState, StateRecord } from "../types/index.js";
+import type { PipelineState, StateRecord, RawExtractedFields } from "../types/index.js";
 import { runDiscovery, type DiscoveryCandidate } from "./discovery.js";
 import { deterministicDedupe, type DedupeCandidate } from "../services/deduplicator.js";
 import { researchMock, researchLive, mergeEvidence } from "./researcher.js";
@@ -155,6 +155,39 @@ function dedupeCandidates(candidates: DiscoveryCandidate[]): {
   return { survivors, mergedAwayIds };
 }
 
+/**
+ * Picks the EXPORT-facing nameKey/slug from the best name actually known by
+ * the time a record is built — never from `cand.rawName` alone.
+ *
+ * Real production bug: a live search result's `name` is sometimes just the
+ * generic facet label ("til markazi", i.e. Uzbek for "language center")
+ * rather than the actual institution name — this happens when Agent 1 found
+ * the institution via a directory listing whose title wasn't a clean name.
+ * `nameKey`/`slug` used to be computed from `cand.rawName` once, at
+ * discovery time, and never revisited — so every institution matching that
+ * generic label exported the identical nameKey/slug ("til-markazi-
+ * tashkent"), which would collide on import. Research (Agent 2) usually
+ * resolves a real name into `fields.nameUz`/`nameLatin`/`nameRu` by the time
+ * the record is built, so prefer that over the raw discovery name. Pure and
+ * exported so this is testable without running the full pipeline.
+ *
+ * This is deliberately separate from the pipeline-internal `id` (see
+ * services/normalizer.ts::generateId), which still keys off the ORIGINAL
+ * discovery-time name for state/processed/review filenames — changing that
+ * mid-flight would break idempotency across reruns. Only the values written
+ * into the exported record change here.
+ */
+export function resolveExportIdentity(
+  fields: RawExtractedFields,
+  cand: Pick<DiscoveryCandidate, "rawName" | "city">
+): { nameKey: string; slug: string } {
+  const bestName = fields.nameUz ?? fields.nameLatin ?? fields.nameRu ?? cand.rawName;
+  return {
+    nameKey: normalizeNameKey(bestName),
+    slug: slugify(bestName, fields.city ?? cand.city ?? ""),
+  };
+}
+
 export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
   ensureDirs();
   const scope = await resolveBrief(opts.brief);
@@ -261,6 +294,23 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
       // goldenpages.uz listing even when research came back without one.
       if (!fields.address && cand.address) fields.address = cand.address;
 
+      // Real production bug: `nameKey`/`slug` above are computed from
+      // `cand.rawName` at DISCOVERY time, before research runs — and a live
+      // search result's `name` is sometimes just the generic facet label
+      // ("til markazi", i.e. "language center") rather than the actual
+      // institution name, especially when the model found it via a
+      // directory listing whose title wasn't a clean name. Research
+      // (Agent 2) usually resolves a much better name into fields.nameUz/
+      // nameLatin/nameRu. Left unfixed, EVERY institution matching that
+      // generic label would export the same nameKey/slug ("til-markazi-
+      // tashkent"), colliding on import. The pipeline-internal `id` (used
+      // for state/processed/review filenames, and for idempotency across
+      // reruns) deliberately still keys off the ORIGINAL discovery-time
+      // name — changing it mid-flight would break resumability — only the
+      // EXPORTED nameKey/slug are recomputed from the best name actually
+      // resolved by the time we're about to build the record.
+      const { nameKey: exportNameKey, slug: exportSlug } = resolveExportIdentity(fields, cand);
+
       transition(state, "VERIFIED");
 
       // --- CONTENT_READY ---
@@ -268,7 +318,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
       transition(state, "CONTENT_READY", content.needsContentReview ? content.reason : undefined);
 
       // --- JSON_READY ---
-      const built = buildExportRecord(id, slug, nameKey, fields, content);
+      const built = buildExportRecord(id, exportSlug, exportNameKey, fields, content);
       if (!built.record) {
         writeFileSync(
           join(REVIEW_DIR, `${id}.json`),
