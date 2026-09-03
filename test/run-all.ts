@@ -71,7 +71,7 @@ import {
 import type { EvidenceItem, RawExtractedFields } from "../src/types/index.js";
 import { buildExportRecord, exportFinalArtifacts } from "../src/agents/bilimon-exporter.js";
 import { detectNonEducationalOrg } from "../src/services/relevance-filter.js";
-import { resolveExportIdentity, dedupeCandidates, maxTotalRaw } from "../src/agents/orchestrator.js";
+import { resolveExportIdentity, dedupeCandidates, maxTotalRaw, buildResultRow } from "../src/agents/orchestrator.js";
 import { selectResearchEvidenceSource } from "../src/agents/researcher.js";
 import { parseRunRequest } from "../src/server.js";
 import type { BilimOnExportRecord, StateRecord } from "../src/types/index.js";
@@ -1506,6 +1506,31 @@ console.log("23. kursi24.uz scraper parses a real captured page correctly (src/s
   assert(cand.phone === "+998555145252" && cand.website === "https://result-school.uz/", "the mapped candidate carries the real contact fields");
   assert(cand.category === "LANGUAGES", "the mapped candidate carries the inferred category");
   assert(cand.descriptionSourceText?.includes("Result o'quv markazi"), "the mapped candidate carries the real description text");
+}
+
+console.log("24. Results table shows which discovery source found each institution (src/agents/orchestrator.ts::buildResultRow)");
+{
+  // Real user complaint: the kursi24.uz scraper (services/kursi24.ts) runs
+  // silently alongside the LLM-search facets inside discoverLive() — there
+  // was no way to see which source actually found a given result in the
+  // web frontend's results table.
+  const kursiCand: DiscoveryCandidate = {
+    discoveryId: "https://kursi24.uz/uz/centre/never-persisted",
+    rawName: "Never Persisted Institute",
+    sourceType: "kursi24_scrape",
+    discoveredAt: new Date().toISOString(),
+  };
+  const kursiRow = buildResultRow("test-never-persisted-kursi24", kursiCand);
+  assert(kursiRow.source === "kursi24.uz", `a kursi24_scrape candidate's row is labeled "kursi24.uz" (got "${kursiRow.source}")`);
+
+  const searchCand: DiscoveryCandidate = {
+    discoveryId: "https://example.uz/some-listing",
+    rawName: "Never Persisted Institute 2",
+    sourceType: "web_search",
+    discoveredAt: new Date().toISOString(),
+  };
+  const searchRow = buildResultRow("test-never-persisted-search", searchCand);
+  assert(searchRow.source === "LLM qidiruv", `a web_search candidate's row is labeled "LLM qidiruv" (got "${searchRow.source}")`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

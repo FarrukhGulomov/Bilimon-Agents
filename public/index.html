@@ -111,6 +111,8 @@
   .badge.needsReview { background: #fef9c3; color: #a16207; }
   .badge.rejected { background: #fee2e2; color: #b91c1c; }
   .badge.pending { background: #e5e7eb; color: #4b5563; }
+  .badge.source-kursi24 { background: #ede9fe; color: #6d28d9; }
+  .badge.source-other { background: #e5e7eb; color: #4b5563; }
 </style>
 </head>
 <body>
@@ -155,6 +157,7 @@
             <th>Turi</th>
             <th>Shahar</th>
             <th>Ball</th>
+            <th>Manba</th>
             <th>Holat</th>
           </tr>
         </thead>
@@ -193,12 +196,20 @@
       resultsCard.style.display = "none";
       return;
     }
-    resultsTitle.textContent = `Natijalar (${rows.length} ta):`;
+    // Per-source counts (e.g. "12 ta — kursi24.uz: 5, LLM qidiruv: 7") so the
+    // kursi24.uz scraper's contribution is visible, not silently folded into
+    // one undifferentiated total.
+    const bySource = {};
+    for (const r of rows) bySource[r.source] = (bySource[r.source] || 0) + 1;
+    const sourceBreakdown = Object.entries(bySource).map(([src, n]) => `${src}: ${n}`).join(", ");
+    resultsTitle.textContent = `Natijalar (${rows.length} ta — ${sourceBreakdown}):`;
+
     resultsBody.innerHTML = rows.map((r) => {
       const website = r.website
         ? `<a href="${escapeHtml(r.website)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.website)}</a>`
         : "—";
       const status = STATUS_LABELS[r.status] || r.status;
+      const sourceClass = r.source === "kursi24.uz" ? "source-kursi24" : "source-other";
       return `<tr>
         <td class="name-cell">${escapeHtml(r.name)}</td>
         <td>${r.phone ? escapeHtml(r.phone) : "—"}</td>
@@ -206,6 +217,7 @@
         <td>${r.type ? escapeHtml(r.type) : "—"}</td>
         <td>${r.city ? escapeHtml(r.city) : "—"}</td>
         <td>${typeof r.qualityScore === "number" ? r.qualityScore : "—"}</td>
+        <td><span class="badge ${sourceClass}">${escapeHtml(r.source || "—")}</span></td>
         <td><span class="badge ${escapeHtml(r.status)}">${escapeHtml(status)}</span></td>
       </tr>`;
     }).join("");
