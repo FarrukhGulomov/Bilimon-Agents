@@ -12,7 +12,9 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/cli.js run",
+    "start": "node dist/server.js",
+    "server": "tsx src/server.ts",
+    "cli": "node dist/cli.js",
     "pipeline": "tsx src/cli.ts",
     "test": "tsx test/run-all.ts"
   },
