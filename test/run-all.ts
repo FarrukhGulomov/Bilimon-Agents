@@ -27,11 +27,19 @@
  *
  * Run with: npm test  (== tsx test/run-all.ts)
  */
-import { readFileSync } from "node:fs";
-import { slugify, normalizePhone, generateId, normalizeNameKey, normalizeLanguages, normalizeLanguageCode } from "../src/services/normalizer.js";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { slugify, normalizePhone, generateId, generateDuplicateBookkeepingId, normalizeNameKey, normalizeLanguages, normalizeLanguageCode } from "../src/services/normalizer.js";
 import { resolveCity } from "../src/services/location-mapper.js";
 import { deterministicDedupe } from "../src/services/deduplicator.js";
-import { validateRecord } from "../src/services/validator.js";
+import { validateRecord, validateBatch } from "../src/services/validator.js";
+import {
+  isBlockedIp,
+  isRedirectStatus,
+  resolveRedirectTarget,
+  capChunks,
+} from "../src/services/scraper.js";
 import { BilimOnExportRecordZ } from "../src/schemas/bilimon-export.zod.js";
 import { runWithConcurrency } from "../src/services/concurrency.js";
 import {
@@ -61,8 +69,16 @@ import {
 } from "../src/services/scoring.js";
 import type { EvidenceItem, RawExtractedFields } from "../src/types/index.js";
 import { buildExportRecord, exportFinalArtifacts } from "../src/agents/bilimon-exporter.js";
-import { resolveExportIdentity } from "../src/agents/orchestrator.js";
-import type { BilimOnExportRecord } from "../src/types/index.js";
+import { detectNonEducationalOrg } from "../src/services/relevance-filter.js";
+import { resolveExportIdentity, dedupeCandidates } from "../src/agents/orchestrator.js";
+import { selectResearchEvidenceSource } from "../src/agents/researcher.js";
+import type { BilimOnExportRecord, StateRecord } from "../src/types/index.js";
+import type { DiscoveryCandidate } from "../src/agents/discovery.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const DATA_STATE_DIR = join(__dirname, "..", "data", "state");
+const DATA_PROCESSED_DIR = join(__dirname, "..", "data", "processed");
+const DATA_REVIEW_DIR = join(__dirname, "..", "data", "review");
 
 const REAL_TASHKENT_CITY_ID = "cmrfw8t3y000fn3og703hdh1a";
 const REAL_TASHKENT_REGION_ID = "cmrfw8t2z0000n3ogoka95589";
@@ -540,11 +556,51 @@ console.log("9i. discovery scope excludes full universities/schools by default (
   const defaultScope = buildScopeInstruction(undefined);
   assert(/degree-granting universit/i.test(defaultScope), "the default (no explicit type) instruction excludes degree-granting universities");
   assert(/K-12 schools and lyceums/i.test(defaultScope), "the default instruction also excludes K-12 schools/lyceums");
-  assert(/charit(y|ies)/i.test(defaultScope), "the charity/NGO exclusion from the earlier fix is still present in the default case");
+  assert(/humanitarian aid/i.test(defaultScope), "the non-educational-activity exclusion (successor to the earlier charity/NGO fix) is still present in the default case");
+  assert(
+    /include it even if it happens to be run by a foundation or ngo/i.test(defaultScope),
+    "the exclusion is activity-based, not legal-form-based — a foundation/NGO that actually runs real courses must stay in scope (many genuine Uzbekistan learning centers are legally structured that way)"
+  );
 
   const schoolScope = buildScopeInstruction("SCHOOL");
   assert(/schools, lyceums/i.test(schoolScope), 'an explicit type="SCHOOL" request (a future, brief-narrowed case) is schools-inclusive');
   assert(!/degree-granting universit/i.test(schoolScope), "the schools-inclusive branch doesn't carry the university exclusion wording (it's a different scope, not a superset)");
+}
+
+console.log("9j. relevance-filter catches a medical clinic even though the search prompt already excludes them");
+{
+  // Real production failure: the search prompt explicitly excludes
+  // hospitals/clinics, but a live run still approved "Neo Clinic Tashkent"
+  // (neurology, pediatrics, EEG diagnostics, ABA therapy) as a
+  // KIDS_EDUCATION learning center — the model didn't reliably follow the
+  // prompt's own exclusion for a borderline case. This is the deterministic
+  // backstop.
+  const clinicFields = {
+    nameUz: "Neo Clinic Tashkent",
+    nameRu: "NEO clinic",
+    programs: ["Детский невролог-эпилептолог", "ЭЭГ (Электроэнцефалография)", "Реабилитация"],
+    specializations: ["АВА терапия"],
+  } as any;
+  const reason = detectNonEducationalOrg(clinicFields);
+  assert(reason !== null, "the exact real-world clinic fields are flagged as non-educational");
+
+  const clinicBuilt = buildExportRecord(
+    "idclinic", "slug", "namekey", clinicFields,
+    { descriptionUz: "tavsif", descriptionRu: "описание", needsContentReview: false }
+  );
+  assert(clinicBuilt.record === null, "buildExportRecord refuses to build a record for the clinic (routes to NEEDS_REVIEW, not silently exported)");
+
+  // False-positive guard: a legitimate kids' development center offering
+  // speech therapy / sensory work must NOT be flagged just because
+  // "therapy"-adjacent Uzbek/Russian words appear — only strong,
+  // unambiguous medical-organization terms (clinic, hospital, EEG, named
+  // medical specialties like nevrolog/pediatr) trigger this filter.
+  const legitKidsCenter = {
+    nameUz: "Kids Development Center",
+    programs: ["Nutq terapiyasi", "Sensor integratsiya", "Logopedik mashg'ulotlar"],
+    specializations: ["Erta rivojlanish"],
+  } as any;
+  assert(detectNonEducationalOrg(legitKidsCenter) === null, "a legitimate kids' development/speech-therapy center is NOT flagged");
 }
 
 console.log("9h. bilimon-import.json is wrapped {version, exportedAt, institutions: [...]}, not a bare array");
@@ -1038,6 +1094,270 @@ console.log("15. Researcher normalizes model output and classifies sources witho
   // call, not just the old {title,url,snippet} one.
   assert(JSON.stringify(coerceToArray<{ name: string }>({ institutions: [{ name: "a" }] })) === JSON.stringify([{ name: "a" }]), "coerceToArray unwraps a wrapper object for any element shape");
   assert(JSON.stringify(coerceToArray({})) === "[]", "coerceToArray degrades to [] rather than throwing");
+}
+
+console.log("16. Duplicate-bookkeeping id can never collide with a real survivor's pipeline id");
+{
+  // Real production bug (Railway): the duplicate-bookkeeping state entry
+  // written for every discovery result dedupe merged away used to be keyed
+  // by generateId(normalizeNameKey(rawName), city) — the EXACT SAME id
+  // function processCandidate() uses for the SURVIVING candidate. Two
+  // candidates with identical rawName+city (e.g. found via a directory
+  // listing and a separate search-result snippet, matched into one dedupe
+  // group) therefore produced the SAME id for both the merged-away duplicate
+  // and the kept survivor. Whichever ran first wrote REJECTED under that
+  // shared id; the survivor's later processCandidate() call then saw an
+  // already-terminal REJECTED state and skipped it — silently dropping a
+  // real institution from every export.
+  const rawName = "Cambridge Learning Center";
+  const city = "Tashkent";
+  const survivor: DiscoveryCandidate = {
+    discoveryId: "survivor-source-1",
+    rawName,
+    city,
+    sourceType: "web_search",
+    discoveredAt: new Date().toISOString(),
+    phone: "+998901112233",
+  };
+  // A second, independently-discovered result for the SAME institution
+  // (identical rawName+city — e.g. the same title text scraped from a
+  // directory listing AND a search snippet) that only matches via phone,
+  // not via a distinguishing name difference.
+  const duplicate: DiscoveryCandidate = {
+    discoveryId: "duplicate-source-2",
+    rawName,
+    city,
+    sourceType: "web_search",
+    discoveredAt: new Date().toISOString(),
+    phone: "+998901112233",
+  };
+
+  const { survivors, mergedAwayIds } = dedupeCandidates([survivor, duplicate]);
+  assert(mergedAwayIds.size === 1, `dedupe merges the collision-prone pair into one group (got ${mergedAwayIds.size} merged-away id(s))`);
+  assert(survivors.length === 1, "exactly one candidate survives dedupe");
+
+  const dupId = [...mergedAwayIds][0];
+  const dupCand = [survivor, duplicate].find((c) => c.discoveryId === dupId)!;
+  const survivorCand = survivors[0];
+
+  // Prove the OLD scheme really did collide (this is the bug, reproduced).
+  const oldStyleProvisionalId = generateId(normalizeNameKey(dupCand.rawName), dupCand.city ?? "");
+  const survivorPipelineId = generateId(normalizeNameKey(survivorCand.rawName), survivorCand.city ?? "");
+  assert(
+    oldStyleProvisionalId === survivorPipelineId,
+    `sanity check: the old id scheme DID collide for this scenario (dup="${oldStyleProvisionalId}", survivor="${survivorPipelineId}")`
+  );
+
+  // Prove the FIX: the new bookkeeping id can never equal the survivor's real id.
+  const newProvisionalId = generateDuplicateBookkeepingId(dupCand.discoveryId);
+  assert(
+    newProvisionalId !== survivorPipelineId,
+    `fixed duplicate-bookkeeping id does NOT collide with the survivor's pipeline id (dup-bookkeeping="${newProvisionalId}", survivor="${survivorPipelineId}")`
+  );
+  assert(newProvisionalId.startsWith("dup-"), `duplicate-bookkeeping id is structurally distinct from a "pipeline-" id (got "${newProvisionalId}")`);
+  assert(!newProvisionalId.startsWith("pipeline-"), "duplicate-bookkeeping id never looks like a real pipeline id");
+
+  // Two different duplicate discoveryIds never collide with each other either.
+  const otherDupId = generateDuplicateBookkeepingId("some-other-discovery-id");
+  assert(otherDupId !== newProvisionalId, "different discoveryIds produce different bookkeeping ids");
+}
+
+console.log("17. exportFinalArtifacts() re-validates the approved batch before writing — a colliding slug is pulled into NEEDS_REVIEW, not shipped");
+{
+  // Real production bug: exportFinalArtifacts() used to write every
+  // APPROVED-state record straight into bilimon-import.json with no final
+  // batch-level re-check, even though validateBatch() (slug uniqueness /
+  // duplicate name+city detection) already existed as a manual `pipeline
+  // validate` command. State files persist across reruns BY DESIGN, so two
+  // separately-approved records could collide on slug and both ship.
+  const now = new Date().toISOString();
+  const idA = "test-fix2-collision-a";
+  const idB = "test-fix2-collision-b";
+  const collidingSlug = "test-fix2-collision-slug";
+
+  function makeState(id: string): StateRecord {
+    return { id, state: "APPROVED", createdAt: now, updatedAt: now, retryCount: 0, history: [{ state: "APPROVED", at: now }] };
+  }
+  function makeRecord(id: string, nameUz: string): BilimOnExportRecord {
+    return {
+      id: null,
+      nameUz,
+      nameRu: nameUz,
+      nameKey: normalizeNameKey(nameUz),
+      slug: collidingSlug,
+      type: "COURSE_CENTER",
+      additionalTypes: [],
+      status: "PENDING",
+      phone: null,
+      phone2: null,
+      email: null,
+      website: null,
+      telegram: null,
+      instagram: null,
+      cityId: REAL_TASHKENT_CITY_ID,
+      regionId: REAL_TASHKENT_REGION_ID,
+      address: null,
+      lat: null,
+      lng: null,
+      isVerified: false,
+      trialLessonEnabled: false,
+      deliveryMode: "OFFLINE",
+      details: {
+        descriptionUz: "Test tavsif",
+        descriptionRu: "Тестовое описание",
+        foundedYear: null,
+        studentCount: null,
+        teacherCount: null,
+        languages: ["uz"],
+        programs: [],
+        shifts: [],
+        specializations: [],
+        achievements: null,
+        categories: ["IT_COURSES"],
+      },
+      pricing: null,
+      media: [],
+      branches: [],
+    };
+  }
+
+  const recA = makeRecord(idA, "Fix2 Collision Test A");
+  const recB = makeRecord(idB, "Fix2 Collision Test B");
+
+  // Sanity check: these two records, considered alone, are each individually
+  // valid — the ONLY thing wrong with them is the batch-level slug collision.
+  assert(validateRecord(recA).valid, "colliding record A is individually valid on its own");
+  assert(validateRecord(recB).valid, "colliding record B is individually valid on its own");
+  const batchCheck = validateBatch([recA, recB]);
+  assert(!batchCheck.get(collidingSlug)?.valid, "validateBatch() itself already flags the slug collision (this is the pre-existing check exportFinalArtifacts never ran)");
+
+  const paths = [
+    join(DATA_STATE_DIR, `${idA}.json`),
+    join(DATA_STATE_DIR, `${idB}.json`),
+    join(DATA_PROCESSED_DIR, `${idA}.json`),
+    join(DATA_PROCESSED_DIR, `${idB}.json`),
+    join(DATA_REVIEW_DIR, `${idA}.json`),
+    join(DATA_REVIEW_DIR, `${idB}.json`),
+  ];
+
+  try {
+    for (const d of [DATA_STATE_DIR, DATA_PROCESSED_DIR, DATA_REVIEW_DIR]) {
+      if (!existsSync(d)) mkdirSync(d, { recursive: true });
+    }
+    writeFileSync(join(DATA_STATE_DIR, `${idA}.json`), JSON.stringify(makeState(idA), null, 2), "utf-8");
+    writeFileSync(join(DATA_STATE_DIR, `${idB}.json`), JSON.stringify(makeState(idB), null, 2), "utf-8");
+    writeFileSync(join(DATA_PROCESSED_DIR, `${idA}.json`), JSON.stringify(recA, null, 2), "utf-8");
+    writeFileSync(join(DATA_PROCESSED_DIR, `${idB}.json`), JSON.stringify(recB, null, 2), "utf-8");
+
+    const { importPath, report } = exportFinalArtifacts();
+    const written = JSON.parse(readFileSync(importPath, "utf-8"));
+    const shippedCollisionCount = written.institutions.filter((r: BilimOnExportRecord) => r.slug === collidingSlug).length;
+    // validateBatch() (already-existing logic, reused as-is) flags EVERY
+    // record sharing a non-unique slug, not just the "extra" ones past the
+    // first — so neither colliding record ships; both route to human
+    // review rather than the pipeline silently guessing which one is real.
+    assert(shippedCollisionCount === 0, `neither colliding-slug record ships in bilimon-import.json — validateBatch flags all of them, not just the extras (got ${shippedCollisionCount} shipped)`);
+
+    const reviewA = existsSync(join(DATA_REVIEW_DIR, `${idA}.json`));
+    const reviewB = existsSync(join(DATA_REVIEW_DIR, `${idB}.json`));
+    assert(reviewA && reviewB, "both colliding records are pulled out to data/review/ with their failure reasons");
+
+    const demotedA = JSON.parse(readFileSync(join(DATA_STATE_DIR, `${idA}.json`), "utf-8")) as StateRecord;
+    const demotedB = JSON.parse(readFileSync(join(DATA_STATE_DIR, `${idB}.json`), "utf-8")) as StateRecord;
+    assert(demotedA.state === "NEEDS_REVIEW" && demotedB.state === "NEEDS_REVIEW", "both pulled-out records' on-disk state is demoted to NEEDS_REVIEW, not left claiming APPROVED");
+
+    assert(
+      written.institutions.length === report.approved,
+      `report.json's "approved" count matches the actual number of institutions written to bilimon-import.json (institutions=${written.institutions.length}, report.approved=${report.approved})`
+    );
+    assert(report.needsReview >= 2, `report.json's "needsReview" count reflects both demoted records (got ${report.needsReview})`);
+  } finally {
+    for (const p of paths) {
+      if (existsSync(p)) unlinkSync(p);
+    }
+    // Regenerate the real bilimon-import.json/report.json from the actual
+    // (non-test) state on disk, so later tests/manual runs never see this
+    // test's synthetic records.
+    exportFinalArtifacts();
+  }
+}
+
+console.log("18. SSRF hardening: private/loopback/link-local addresses are blocked, public ones are not");
+{
+  assert(isBlockedIp("127.0.0.1"), "127.0.0.1 (loopback) is blocked");
+  assert(isBlockedIp("localhost") === true, "a non-IP string is blocked (conservative default)");
+  assert(isBlockedIp("169.254.169.254"), "169.254.169.254 (cloud metadata) is blocked");
+  assert(isBlockedIp("10.0.0.5"), "10.0.0.5 (RFC1918) is blocked");
+  assert(isBlockedIp("172.16.0.1"), "172.16.0.1 (RFC1918) is blocked");
+  assert(isBlockedIp("172.31.255.255"), "172.31.255.255 (top of 172.16.0.0/12) is blocked");
+  assert(!isBlockedIp("172.32.0.1"), "172.32.0.1 (just outside 172.16.0.0/12) is NOT blocked");
+  assert(isBlockedIp("192.168.1.1"), "192.168.1.1 (RFC1918) is blocked");
+  assert(isBlockedIp("0.0.0.0"), "0.0.0.0 is blocked");
+  assert(isBlockedIp("::1"), "::1 (IPv6 loopback) is blocked");
+  assert(isBlockedIp("fe80::1"), "fe80::1 (IPv6 link-local) is blocked");
+  assert(isBlockedIp("fc00::1"), "fc00::1 (IPv6 unique local) is blocked");
+  assert(isBlockedIp("::ffff:127.0.0.1"), "IPv4-mapped IPv6 loopback is blocked (classified via the embedded IPv4 address)");
+  assert(!isBlockedIp("8.8.8.8"), "8.8.8.8 (public) is NOT blocked");
+  assert(!isBlockedIp("93.184.216.34"), "an ordinary public IP is NOT blocked");
+  assert(!isBlockedIp("2606:4700:4700::1111"), "a public IPv6 address is NOT blocked");
+
+  // Redirect-hop validation: every hop must be re-resolved relative to the
+  // URL it came from, and an unparseable Location header must fail closed.
+  assert(isRedirectStatus(301) && isRedirectStatus(302) && isRedirectStatus(307) && isRedirectStatus(308), "3xx codes are recognized as redirects");
+  assert(!isRedirectStatus(200) && !isRedirectStatus(404), "non-3xx codes are not treated as redirects");
+  assert(
+    resolveRedirectTarget("/next", "https://example.uz/a/b") === "https://example.uz/next",
+    "a relative redirect Location is resolved against the URL it was returned for"
+  );
+  assert(
+    resolveRedirectTarget("http://169.254.169.254/latest/meta-data/", "https://example.uz/") === "http://169.254.169.254/latest/meta-data/",
+    "an absolute redirect Location resolves to itself (still subject to the same classifyUrlForFetch check on the next hop)"
+  );
+  assert(resolveRedirectTarget("http://[::not-a-valid-host", "https://example.uz/") === null, "an unparseable redirect Location resolves to null (fails closed, never fetched)");
+
+  // Byte-cap logic: truncates at maxBytes rather than reading everything.
+  const enc = new TextEncoder();
+  const chunks = [enc.encode("aaaaa"), enc.encode("bbbbb"), enc.encode("ccccc")]; // 15 bytes total
+  const capped = capChunks(chunks, 8);
+  assert(capped.length === 8, `capChunks stops at the byte cap rather than reading the full body (got length ${capped.length})`);
+  assert(capped.toString("utf-8") === "aaaaabbb", `capChunks keeps bytes in order up to the cap (got "${capped.toString("utf-8")}")`);
+  const underCap = capChunks([enc.encode("short")], 100);
+  assert(underCap.toString("utf-8") === "short", "capChunks passes small bodies through unchanged when under the cap");
+}
+
+console.log("19. Research evidence carries the real cited source URL, not the synthetic placeholder");
+{
+  // Real production bug: the primary web-search evidence item — where most
+  // extracted fields (phone, address, programs, etc.) actually come from —
+  // was ALWAYS recorded under a synthetic research://web-search/... URI,
+  // even when the same research call returned real https:// cited URLs. A
+  // human reviewer opening data/research/<id>.json to check provenance saw
+  // a fake URI instead of the real page(s) the model actually cited.
+  const nameKey = "example-learning-center";
+
+  const withRealUrls = selectResearchEvidenceSource(nameKey, [
+    "https://example-lc.uz/about",
+    "https://t.me/example_lc",
+  ]);
+  assert(withRealUrls.sourceUrl === "https://example-lc.uz/about", `the primary real cited URL becomes the evidence item's sourceUrl (got "${withRealUrls.sourceUrl}")`);
+  assert(!withRealUrls.sourceUrl.startsWith("research://"), "the sourceUrl is never the synthetic placeholder when real URLs exist");
+  assert(
+    JSON.stringify(withRealUrls.additionalSourceUrls) === JSON.stringify(["https://t.me/example_lc"]),
+    `further real cited URLs are preserved in additionalSourceUrls rather than discarded (got ${JSON.stringify(withRealUrls.additionalSourceUrls)})`
+  );
+
+  const withOneUrl = selectResearchEvidenceSource(nameKey, ["https://example-lc.uz/about"]);
+  assert(withOneUrl.sourceUrl === "https://example-lc.uz/about", "a single real cited URL becomes the sourceUrl");
+  assert(withOneUrl.additionalSourceUrls === undefined, "additionalSourceUrls is omitted when there is only one real cited URL");
+
+  const withNoUrls = selectResearchEvidenceSource(nameKey, []);
+  assert(withNoUrls.sourceUrl === `research://web-search/${encodeURIComponent(nameKey)}`, `the synthetic placeholder is still used as a fallback when the model cited zero real URLs (got "${withNoUrls.sourceUrl}")`);
+  assert(withNoUrls.additionalSourceUrls === undefined, "no additionalSourceUrls when falling back to the placeholder");
+
+  // Non-http(s) junk (e.g. a bare handle) must never leak through as if it
+  // were a real cited URL.
+  const withJunk = selectResearchEvidenceSource(nameKey, ["@example_lc", "not-a-url"]);
+  assert(withJunk.sourceUrl === `research://web-search/${encodeURIComponent(nameKey)}`, "non-URL-shaped cited values are filtered out, falling back to the placeholder");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

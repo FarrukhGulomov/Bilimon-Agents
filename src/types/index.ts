@@ -61,6 +61,12 @@ export interface EvidenceItem {
   sourceType: "website" | "social" | "directory" | "search" | "fixture" | "other";
   extractedFields: Partial<RawExtractedFields>;
   rawTextExcerpt?: string;
+  /** When the search-grounded research call cited more than one real page
+   * for this same evidence snapshot, the rest live here (sourceUrl carries
+   * only the primary one) — see agents/researcher.ts::selectResearchEvidenceSource.
+   * Never populated for scrape-sourced evidence items (those are one URL
+   * each already). */
+  additionalSourceUrls?: string[];
   /** 0-1, this evidence item's own reliability. Real mode derives it from
    * source type, how much substantive detail the source actually yielded,
    * and how many other sources corroborate it — see
