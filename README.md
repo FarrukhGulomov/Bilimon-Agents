@@ -270,8 +270,8 @@ npx tsx src/cli.ts validate
 npx tsx src/cli.ts export
 
 # Real mode — requires OPENAI_API_KEY (copy .env.example to .env first).
-# --count N is an arbitrary batch size, not a fixed target — run repeatedly
-# in whatever batch sizes suit your budget/schedule as coverage grows:
+# --count N is a target number of APPROVED institutions, not just a raw
+# discovery batch size — see the retry-until-target note below:
 export OPENAI_API_KEY=sk-...
 npx tsx src/cli.ts run --count 200
 
@@ -284,12 +284,24 @@ PIPELINE_MAX_CONCURRENCY=10 npx tsx src/cli.ts run --count 200
   from `data/fixtures/*` instead of calling the LLM/web search — no
   `OPENAI_API_KEY` needed. This is the only path validated by actually
   running it in this build environment.
-- `pipeline run --count N [--brief "<free text>"]` discovers up to N raw
-  candidates (fixture rows in mock mode, live search results in real mode)
-  scoped by the resolved brief (or the `config/priority-categories.json`
-  default when `--brief` is omitted — see "Brief-driven discovery" below),
-  dedupes them, runs them through research → content → export → scoring, and
-  writes `data/export/bilimon-import.json` (APPROVED records only) and
+- `pipeline run --count N [--brief "<free text>"]` treats N as a target
+  number of APPROVED institutions, not just a raw discovery batch size.
+  `runPipeline()` (src/agents/orchestrator.ts) discovers a batch scoped by
+  the resolved brief (or the `config/priority-categories.json` default when
+  `--brief` is omitted — see "Brief-driven discovery" below), dedupes it,
+  runs it through research → content → export → scoring, and — if fewer
+  than N ended up APPROVED — automatically discovers additional batches
+  (buffered for the quality gate's known attrition rate) and keeps going
+  until the target is met, up to a bounded number of rounds/total raw
+  candidates fetched (so one request can't loop forever or fetch an
+  unbounded amount of real API spend). If the resolved scope's search space
+  genuinely runs out first (a round returns zero candidates not already
+  seen), the run stops and reports the shortfall honestly — `pipeline run`
+  prints a `Shortfall: requested N, approved M (...)` line, and
+  `RunSummary.shortfall`/`.searchExhausted` carry the same information for
+  the web frontend and any other caller — rather than silently handing back
+  fewer institutions than asked for with no explanation. Writes
+  `data/export/bilimon-import.json` (APPROVED records only) and
   `data/export/report.json`.
 - `pipeline validate` re-validates `data/export/bilimon-import.json` (or,
   if absent, everything under `data/processed/`) against
@@ -379,10 +391,22 @@ npm run server
   default ceiling 50 per request — an open form must not let one click
   trigger an unbounded real-API-spend batch).
 - Submitting `POST /api/run` runs the exact same `runPipeline()` +
-  `finalizeExport()` used by `pipeline run`, then the page shows a
-  summary (approved/needsReview/rejected/duplicates) and a "JSON yuklab
-  olish" button that downloads `data/export/bilimon-import.json` via
-  `GET /api/download`.
+  `finalizeExport()` used by `pipeline run` — including the
+  retry-until-target behavior above, so the count you type is what you
+  actually get back whenever the resolved scope has enough real
+  institutions in it — then the page shows a per-institution results
+  table (name/phone/website/type/city/status) and a "JSON yuklab olish"
+  button. That button builds the download from the full import file
+  content already embedded in the `/api/run` response (a `Blob`, no
+  second request) rather than fetching `GET /api/download` separately —
+  real production bug: on a host with no persistent volume, that file
+  could be gone from disk by the time the button was clicked (a restart,
+  redeploy, or a different replica's own ephemeral disk), so a user who
+  had just gotten real results back saw "Hali natija yo'q" trying to
+  download them. If the target wasn't fully met, the summary line says so
+  plainly (how many were requested, how many approved, and whether the
+  search space ran out or the retry/cost ceiling was hit) instead of
+  silently handing back fewer than asked for.
 - Same mock-vs-real gate as the CLI: `PIPELINE_MOCK=1` runs off fixtures
   with no key needed; otherwise a missing API key returns a clear error
   instead of a crash.

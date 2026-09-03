@@ -222,10 +222,18 @@
         statusEl.textContent = data.warning;
       } else {
         const s = data.summary;
-        statusEl.className = "success";
+        const shortfall = s.shortfall || 0;
+        statusEl.className = shortfall > 0 ? "error" : "success";
         statusEl.textContent =
           `Tayyor: ${s.approved} tasdiqlandi, ${s.needsReview} ko'rib chiqish kerak, ` +
           `${s.rejected} rad etildi (jami ${s.processed} ta, ${s.duplicates} dublikat).`;
+        if (shortfall > 0) {
+          statusEl.textContent +=
+            `\n${s.requested} ta so'ralgan edi, ${shortfall} ta yetishmaydi — ` +
+            (s.searchExhausted
+              ? "tanlangan soha/shahar bo'yicha boshqa yangi o'quv markazi topilmadi."
+              : "qidiruv urinishlar chegarasiga yetdi, keyinroq qayta urinib ko'ring.");
+        }
       }
 
       renderResults(data.results);

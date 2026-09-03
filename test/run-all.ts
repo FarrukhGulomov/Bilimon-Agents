@@ -70,7 +70,7 @@ import {
 import type { EvidenceItem, RawExtractedFields } from "../src/types/index.js";
 import { buildExportRecord, exportFinalArtifacts } from "../src/agents/bilimon-exporter.js";
 import { detectNonEducationalOrg } from "../src/services/relevance-filter.js";
-import { resolveExportIdentity, dedupeCandidates } from "../src/agents/orchestrator.js";
+import { resolveExportIdentity, dedupeCandidates, maxTotalRaw } from "../src/agents/orchestrator.js";
 import { selectResearchEvidenceSource } from "../src/agents/researcher.js";
 import { parseRunRequest } from "../src/server.js";
 import type { BilimOnExportRecord, StateRecord } from "../src/types/index.js";
@@ -1395,6 +1395,19 @@ console.log("20. Web frontend request validation (src/server.ts::parseRunRequest
   const longBrief = "a".repeat(1000);
   const truncated = parseRunRequest(JSON.stringify({ brief: longBrief, count: 1 }));
   assert(!("error" in truncated) && truncated.brief!.length === 300, `an overlong brief is truncated to the MAX_BRIEF_LENGTH cap rather than rejected or passed through unbounded (got length ${!("error" in truncated) ? truncated.brief!.length : "n/a"})`);
+}
+
+console.log("21. Retry-until-target discovery ceiling (src/agents/orchestrator.ts::maxTotalRaw)");
+{
+  // The platform's whole point is delivering as many APPROVED institutions
+  // as were asked for, not just running one raw discovery batch through the
+  // quality gate once — runPipeline() now keeps discovering additional
+  // batches until the target is met, bounded by maxTotalRaw(count) so one
+  // request can't fetch an unbounded amount of real API spend.
+  assert(maxTotalRaw(1) === 21, `a small count gets a generous floor so a single-institution request still gets real retry room (got ${maxTotalRaw(1)})`);
+  assert(maxTotalRaw(10) === 40, `count*4 dominates once count is large enough (got ${maxTotalRaw(10)})`);
+  assert(maxTotalRaw(50) === 200, `the ceiling caps out at 200 rather than scaling unboundedly with count (got ${maxTotalRaw(50)})`);
+  assert(maxTotalRaw(1000) === 200, `an oversized count is still capped at 200 (got ${maxTotalRaw(1000)})`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
