@@ -112,7 +112,13 @@ export function loadMockDiscoveryFixture(): MockDiscoveryEntry[] {
 function matchesScope(entry: MockDiscoveryEntry, scope: DiscoveryScope): boolean {
   const typeOk = scope.types === "all" || scope.types.includes(entry.type as InstitutionType);
   const categoryOk = scope.categories === "all" || scope.categories.includes(entry.category as Category);
-  return typeOk && categoryOk;
+  // Real production gap: this used to ignore scope.regions entirely, so a
+  // city-scoped brief (e.g. the web frontend's city dropdown, or "--brief
+  // 'Buxoroda'") silently returned fixtures from EVERY city in --mock mode,
+  // even though discoverLive already hard-filters live search by region —
+  // --mock's whole purpose is exercising the same scoping logic offline.
+  const regionOk = scope.regions === "all" || scope.regions.includes(entry.city);
+  return typeOk && categoryOk && regionOk;
 }
 
 /**

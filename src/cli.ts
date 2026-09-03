@@ -98,6 +98,12 @@ async function cmdRun(flags: Record<string, string | boolean>) {
   console.log(
     `Outcomes this run: approved=${summary.approved} needsReview=${summary.needsReview} rejected=${summary.rejected}`
   );
+  if (summary.shortfall > 0) {
+    console.log(
+      `Shortfall: requested ${count}, approved ${summary.approved} (${summary.shortfall} short)` +
+        (summary.searchExhausted ? " — search space exhausted for this scope." : " — hit the retry/cost ceiling.")
+    );
+  }
   const { importPath, reportPath, report } = finalizeExport();
   console.log(`Wrote ${importPath}`);
   console.log(`Wrote ${reportPath}`);

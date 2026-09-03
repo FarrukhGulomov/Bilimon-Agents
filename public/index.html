@@ -25,7 +25,7 @@
     box-shadow: 0 1px 4px rgba(0,0,0,0.08);
   }
   label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 6px; }
-  input[type="text"], input[type="number"] {
+  input[type="text"], input[type="number"], select {
     width: 100%;
     box-sizing: border-box;
     padding: 10px 12px;
@@ -33,6 +33,8 @@
     border-radius: 8px;
     font-size: 1rem;
     margin-bottom: 18px;
+    background: #fff;
+    color: inherit;
   }
   button {
     width: 100%;
@@ -96,6 +98,11 @@
     <form id="run-form">
       <label for="brief">Soha / talab</label>
       <input type="text" id="brief" name="brief" placeholder="masalan: ingliz tili bo'yicha yoki IT sohasi" maxlength="300" />
+
+      <label for="city">Shahar</label>
+      <select id="city" name="city">
+        <option value="">Barcha shaharlar</option>
+      </select>
 
       <label for="count">Nechta o'quv markaz</label>
       <input type="number" id="count" name="count" value="5" min="1" max="50" />
@@ -171,6 +178,25 @@
     resultsCard.style.display = "block";
   }
 
+  const citySelect = document.getElementById("city");
+
+  (async () => {
+    try {
+      const res = await fetch("/api/cities");
+      const data = await res.json();
+      for (const c of data.cities || []) {
+        const opt = document.createElement("option");
+        opt.value = c.nameEn;
+        opt.textContent = c.label;
+        citySelect.appendChild(opt);
+      }
+    } catch (err) {
+      // Non-fatal — the form still works with "Barcha shaharlar" (all
+      // cities) as the only option if this fails.
+      console.error("Shaharlar ro'yxatini yuklab bo'lmadi:", err);
+    }
+  })();
+
   let lastImportFile = null;
 
   downloadBtn.addEventListener("click", () => {
@@ -194,6 +220,7 @@
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const brief = document.getElementById("brief").value.trim();
+    const city = citySelect.value;
     const count = Number(document.getElementById("count").value);
 
     statusEl.className = "";
@@ -207,7 +234,7 @@
       const res = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brief: brief || undefined, count }),
+        body: JSON.stringify({ brief: brief || undefined, city: city || undefined, count }),
       });
       const data = await res.json();
 
@@ -222,10 +249,18 @@
         statusEl.textContent = data.warning;
       } else {
         const s = data.summary;
-        statusEl.className = "success";
+        const shortfall = s.shortfall || 0;
+        statusEl.className = shortfall > 0 ? "error" : "success";
         statusEl.textContent =
           `Tayyor: ${s.approved} tasdiqlandi, ${s.needsReview} ko'rib chiqish kerak, ` +
           `${s.rejected} rad etildi (jami ${s.processed} ta, ${s.duplicates} dublikat).`;
+        if (shortfall > 0) {
+          statusEl.textContent +=
+            `\n${s.requested} ta so'ralgan edi, ${shortfall} ta yetishmaydi — ` +
+            (s.searchExhausted
+              ? "tanlangan soha/shahar bo'yicha boshqa yangi o'quv markazi topilmadi."
+              : "qidiruv urinishlar chegarasiga yetdi, keyinroq qayta urinib ko'ring.");
+        }
       }
 
       renderResults(data.results);

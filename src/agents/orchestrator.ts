@@ -170,6 +170,16 @@ export interface RunSummary {
   /** Per-institution rows for this run only (unlike report.json's
    * cumulative-across-all-runs totals) — see RunResultRow. */
   results: RunResultRow[];
+  /** opts.count minus `approved` — 0 when the run actually delivered as many
+   * approved institutions as asked for. Non-zero means runPipeline's retry
+   * loop kept discovering additional batches until it hit MAX_ROUNDS/
+   * maxTotalRaw or ran out of new candidates (see `searchExhausted`) —
+   * never a silent "gave up after the first pass". */
+  shortfall: number;
+  /** True when the last discovery round returned zero candidates not
+   * already seen this run — the resolved scope's search space is
+   * genuinely exhausted, not just under a cost/attempt ceiling. */
+  searchExhausted: boolean;
 }
 
 type CandidateOutcome = "approved" | "needsReview" | "rejected" | "retry-pending";
@@ -233,49 +243,34 @@ export function resolveExportIdentity(
   };
 }
 
+// A single discovery pass can come up well short of `count` APPROVED
+// institutions — the quality gate rejects/needs-reviews a large share of
+// raw candidates (see scoring.ts), and a narrow brief scope (one category,
+// one city) may only have a handful of live-search units to begin with. The
+// platform's whole point is delivering the number of institutions actually
+// asked for, so runPipeline() below keeps requesting additional discovery
+// batches — sized with a buffer for expected attrition — until the target
+// is met. These bound the retry so it can't run forever or blow an
+// unbounded amount of real API spend on one request: at most MAX_ROUNDS
+// discovery batches, and at most MAX_TOTAL_RAW raw candidates fetched in
+// total across all of them.
+const MAX_ROUNDS = 4;
+export function maxTotalRaw(count: number): number {
+  return Math.min(Math.max(count * 4, count + 20), 200);
+}
+
 export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
   ensureDirs();
   const scope = await resolveBrief(opts.brief);
   persistLastScope(scope);
-  if (!opts.mock) {
-    console.log(
-      "Discovery: running live web search (per-search progress logs below; each search can take tens of seconds)..."
-    );
-  }
-  const candidates = await runDiscovery(opts.count, opts.mock, scope);
-  if (!opts.mock) {
-    console.log(`Discovery: found ${candidates.length} raw candidate(s) before dedupe.`);
-  }
-  const { survivors, mergedAwayIds } = dedupeCandidates(candidates);
-
-  // Record duplicates in state so report.json can count them, without
-  // reprocessing them on subsequent runs.
-  //
-  // Real production bug: this used to key the bookkeeping state entry with
-  // `generateId(normalizeNameKey(cand.rawName), cand.city)` — the SAME id
-  // function processCandidate() uses for the SURVIVING candidate. Two
-  // candidates with identical rawName+city (matched into the same dedupe
-  // group via phone/domain/social, or via name+city itself) produce the
-  // SAME id here and in processCandidate(); the duplicate's REJECTED write
-  // would then make the real survivor's later processCandidate() call see
-  // an already-terminal state and skip it — silently dropping a real
-  // institution. See generateDuplicateBookkeepingId()'s doc comment.
-  for (const dupId of mergedAwayIds) {
-    const cand = candidates.find((c) => c.discoveryId === dupId);
-    if (!cand) continue;
-    const provisionalId = generateDuplicateBookkeepingId(cand.discoveryId);
-    const st = getOrCreateState(provisionalId);
-    if (st.state !== "REJECTED") {
-      st.lastError = "duplicate";
-      transition(st, "REJECTED", "merged as duplicate during dedupe");
-    }
-  }
 
   const processedIds: string[] = [];
+  const duplicateIds: string[] = [];
+  const results: RunResultRow[] = [];
   let approved = 0;
   let needsReview = 0;
   let rejectedCount = 0;
-  const duplicatesSoFar = mergedAwayIds.size;
+  let duplicatesSoFar = 0;
 
   /** Runs one candidate through RESEARCHING -> ... -> quality gate. Mutates
    * per-institution state on disk exactly as the original sequential loop
@@ -454,51 +449,132 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
     }
   }
 
-  for (const cand of survivors) {
-    const id = generateId(normalizeNameKey(cand.rawName), cand.city ?? "");
-    processedIds.push(id);
+  const { maxConcurrency, progressReportEvery } = loadExecutionConfig();
+  const onProgress = opts.onProgress ?? (() => {});
+  const seenDiscoveryIds = new Set<string>();
+  const maxRaw = maxTotalRaw(opts.count);
+  let totalRawFetched = 0;
+  let completed = 0;
+  let round = 0;
+  let searchExhausted = false;
+
+  while (approved < opts.count && round < MAX_ROUNDS && totalRawFetched < maxRaw) {
+    round++;
+    const remaining = opts.count - approved;
+    // Ask for more than the shortfall, since dedupe + the quality gate
+    // shed a large share of raw candidates before they reach APPROVED
+    // (see scoring.ts) — the buffer eases off after the first round so a
+    // large target doesn't blow past maxRaw immediately.
+    const bufferMultiplier = round === 1 ? 3 : 2;
+    const requestCount = Math.min(remaining * bufferMultiplier, maxRaw - totalRawFetched);
+    if (requestCount <= 0) break;
+
+    if (!opts.mock) {
+      console.log(
+        round === 1
+          ? "Discovery: running live web search (per-search progress logs below; each search can take tens of seconds)..."
+          : `Discovery: ${remaining} ta yetarli emas, qo'shimcha qidiruv boshlandi (${round}-urinish)...`
+      );
+    }
+    const rawCandidates = await runDiscovery(requestCount, opts.mock, scope);
+    const newCandidates = rawCandidates.filter((c) => !seenDiscoveryIds.has(c.discoveryId));
+    for (const c of rawCandidates) seenDiscoveryIds.add(c.discoveryId);
+    if (!opts.mock) {
+      console.log(`Discovery: found ${rawCandidates.length} raw candidate(s) (${newCandidates.length} new) before dedupe.`);
+    }
+
+    if (newCandidates.length === 0) {
+      // Nothing new turned up even though we asked for more — the resolved
+      // scope's search space is genuinely exhausted (or a repeat brief has
+      // already surfaced everything it's going to). Retrying again would
+      // just burn API calls for the same result, so stop here rather than
+      // looping MAX_ROUNDS times for nothing.
+      searchExhausted = true;
+      break;
+    }
+    totalRawFetched += newCandidates.length;
+
+    const { survivors, mergedAwayIds } = dedupeCandidates(newCandidates);
+    duplicatesSoFar += mergedAwayIds.size;
+    duplicateIds.push(...mergedAwayIds);
+
+    // Record duplicates in state so report.json can count them, without
+    // reprocessing them on subsequent runs.
+    //
+    // Real production bug: this used to key the bookkeeping state entry with
+    // `generateId(normalizeNameKey(cand.rawName), cand.city)` — the SAME id
+    // function processCandidate() uses for the SURVIVING candidate. Two
+    // candidates with identical rawName+city (matched into the same dedupe
+    // group via phone/domain/social, or via name+city itself) produce the
+    // SAME id here and in processCandidate(); the duplicate's REJECTED write
+    // would then make the real survivor's later processCandidate() call see
+    // an already-terminal state and skip it — silently dropping a real
+    // institution. See generateDuplicateBookkeepingId()'s doc comment.
+    for (const dupId of mergedAwayIds) {
+      const cand = newCandidates.find((c) => c.discoveryId === dupId);
+      if (!cand) continue;
+      const provisionalId = generateDuplicateBookkeepingId(cand.discoveryId);
+      const st = getOrCreateState(provisionalId);
+      if (st.state !== "REJECTED") {
+        st.lastError = "duplicate";
+        transition(st, "REJECTED", "merged as duplicate during dedupe");
+      }
+    }
+
+    for (const cand of survivors) {
+      processedIds.push(generateId(normalizeNameKey(cand.rawName), cand.city ?? ""));
+    }
+
+    let roundCompleted = 0;
+    await runWithConcurrency({
+      items: survivors,
+      limit: maxConcurrency,
+      worker: processCandidate,
+      onSettled: (outcome) => {
+        if (outcome === "approved") approved++;
+        else if (outcome === "needsReview") needsReview++;
+        else if (outcome === "rejected") rejectedCount++;
+        // "retry-pending" contributes to none of the terminal counters yet.
+        completed++;
+        roundCompleted++;
+        if (roundCompleted === survivors.length || completed % progressReportEvery === 0) {
+          onProgress({
+            completed,
+            total: Math.max(opts.count, completed),
+            approved,
+            needsReview,
+            rejected: rejectedCount,
+            duplicates: duplicatesSoFar,
+          });
+        }
+      },
+    });
+
+    for (const cand of survivors) {
+      results.push(buildResultRow(generateId(normalizeNameKey(cand.rawName), cand.city ?? ""), cand));
+    }
   }
 
-  const { maxConcurrency, progressReportEvery } = loadExecutionConfig();
-  let completed = 0;
-  const onProgress = opts.onProgress ?? (() => {});
-
-  await runWithConcurrency({
-    items: survivors,
-    limit: maxConcurrency,
-    worker: processCandidate,
-    onSettled: (outcome) => {
-      if (outcome === "approved") approved++;
-      else if (outcome === "needsReview") needsReview++;
-      else if (outcome === "rejected") rejectedCount++;
-      // "retry-pending" contributes to none of the terminal counters yet.
-      completed++;
-      const isLast = completed === survivors.length;
-      if (isLast || completed % progressReportEvery === 0) {
-        onProgress({
-          completed,
-          total: survivors.length,
-          approved,
-          needsReview,
-          rejected: rejectedCount,
-          duplicates: duplicatesSoFar,
-        });
-      }
-    },
-  });
-
-  const results = survivors.map((cand) =>
-    buildResultRow(generateId(normalizeNameKey(cand.rawName), cand.city ?? ""), cand)
-  );
+  const shortfall = Math.max(0, opts.count - approved);
+  if (shortfall > 0) {
+    console.log(
+      `Ogohlantirish: ${opts.count} ta so'ralgan edi, ${approved} tasi tasdiqlandi (${shortfall} ta yetishmaydi) — ` +
+        (searchExhausted
+          ? "tanlangan qamrovda boshqa yangi o'quv markazi topilmadi."
+          : "urinishlar/xarajat chegarasiga yetildi.")
+    );
+  }
 
   return {
     processedIds,
-    duplicateIds: [...mergedAwayIds],
+    duplicateIds,
     approved,
     needsReview,
     rejected: rejectedCount,
     resolvedScope: scope,
     results,
+    shortfall,
+    searchExhausted,
   };
 }
 
