@@ -230,13 +230,6 @@ function buildScrapeTargets(input: LiveResearchInput, researchCitedUrls: string[
     if (!url || typeof url !== "string") continue;
     const trimmed = url.trim();
     if (!/^https?:\/\//i.test(trimmed)) continue; // "@handle" and bare domains aren't fetchable as-is
-    // TEMPORARY (per explicit user request, 2026-09-03): discovery/research
-    // are restricted to kursi24.uz only for now (see search.ts and
-    // llm-client.ts::researchInstitutionViaWebSearch) — the supplementary
-    // scrape must not undo that by fetching an institution's own official
-    // site/socials just because kursi24.uz's listing happened to mention
-    // them. Revert alongside those two files to restore full-web research.
-    if (!/kursi24\.uz/i.test(trimmed)) continue;
     if (seen.has(trimmed)) continue;
     seen.add(trimmed);
     targets.push(trimmed);

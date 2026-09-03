@@ -467,20 +467,13 @@ export async function researchInstitutionViaWebSearch(
     (links.length > 0 ? `Known links to start from:\n${links.map((l) => `- ${l}`).join("\n")}\n` : "") +
     `Research this ONE institution and report only what you actually find.`;
 
-  // TEMPORARY (per explicit user request, 2026-09-03): general web search
-  // was bringing back low-quality/irrelevant results — restricted to
-  // kursi24.uz/uz ONLY until this is revisited. To restore the prior
-  // official-site/socials/directories research flow, revert this block
-  // (git history has it).
   const instructions =
     "You are a deep-research agent preparing a marketplace listing for ONE named education " +
-    "institution in Uzbekistan. " +
-    "SOURCE RESTRICTION (temporary): research ONLY kursi24.uz/uz (a directory dedicated to " +
-    "Uzbekistan learning/course centers) for this institution. Do NOT use its official website, " +
-    "Instagram, Telegram, Facebook, yellowpages.uz, goldenpages.uz, or general search results as a " +
-    "source for this task — every fact must come from a kursi24.uz/uz page you actually opened. If " +
-    "you cannot find this institution's kursi24.uz/uz listing, return null/empty fields rather than " +
-    "researching it from another source. " +
+    "institution in Uzbekistan. Check, in this order: (1) the institution's official website, " +
+    "(2) its Instagram and Telegram pages, (3) kursi24.uz/uz (a directory dedicated to Uzbekistan " +
+    "learning/course centers) and general Uzbekistan business directories yellowpages.uz and " +
+    "goldenpages.uz, all of which carry structured phone/address data that an institution's own site " +
+    "or social page often omits, (4) any other page that genuinely describes this institution. " +
     "Most real institutions publish in Uzbek or Russian, not English — search in Uzbek and Russian " +
     "too, and do not skip a source because it is not in English.\n\n" +
     "Extract the facts that make this institution sellable to a student: contact details " +
