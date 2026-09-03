@@ -395,18 +395,30 @@ npm run server
   retry-until-target behavior above, so the count you type is what you
   actually get back whenever the resolved scope has enough real
   institutions in it — then the page shows a per-institution results
-  table (name/phone/website/type/city/status) and a "JSON yuklab olish"
-  button. That button builds the download from the full import file
-  content already embedded in the `/api/run` response (a `Blob`, no
-  second request) rather than fetching `GET /api/download` separately —
-  real production bug: on a host with no persistent volume, that file
-  could be gone from disk by the time the button was clicked (a restart,
-  redeploy, or a different replica's own ephemeral disk), so a user who
-  had just gotten real results back saw "Hali natija yo'q" trying to
-  download them. If the target wasn't fully met, the summary line says so
-  plainly (how many were requested, how many approved, and whether the
-  search space ran out or the retry/cost ceiling was hit) instead of
-  silently handing back fewer than asked for.
+  table (name/phone/website/type/city/status) and a "Tasdiqlangan JSON
+  yuklab olish (N ta)" button. That button builds the download from the
+  full import file content already embedded in the `/api/run` response
+  (a `Blob`, no second request) rather than fetching `GET /api/download`
+  separately — real production bug: on a host with no persistent volume,
+  that file could be gone from disk by the time the button was clicked (a
+  restart, redeploy, or a different replica's own ephemeral disk), so a
+  user who had just gotten real results back saw "Hali natija yo'q"
+  trying to download them. If the target wasn't fully met, the summary
+  line says so plainly (how many were requested, how many approved, and
+  whether the search space ran out or the retry/cost ceiling was hit)
+  instead of silently handing back fewer than asked for.
+- The results table also lists NEEDS_REVIEW institutions (they already
+  have a real name/phone/website found — they just didn't clear the
+  quality gate), and a separate "Ko'rib chiqish kerak bo'lganlarni JSON
+  yuklab olish (N ta)" button downloads those too, in the same
+  `{version, exportedAt, institutions}` envelope as the approved file.
+  Real user complaint this fixes: `bilimon-import.json` only ever
+  contains APPROVED records by design (see "Schema status: REAL" above),
+  so there was previously no way to get the needsReview institutions out
+  of the pipeline at all short of digging through `data/processed/*.json`
+  on the server by hand — `RunSummary.needsReviewRecords`
+  (src/agents/orchestrator.ts) surfaces the same already-built export
+  records the results table draws from.
 - Same mock-vs-real gate as the CLI: `PIPELINE_MOCK=1` runs off fixtures
   with no key needed; otherwise a missing API key returns a clear error
   instead of a crash.

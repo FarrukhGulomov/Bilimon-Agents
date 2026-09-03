@@ -56,6 +56,11 @@
     margin-top: 14px;
     background: #15803d;
   }
+  #download-review {
+    display: none;
+    margin-top: 10px;
+    background: #a16207;
+  }
   .spinner {
     display: inline-block;
     width: 14px;
@@ -110,7 +115,8 @@
       <button type="submit" id="submit-btn">Qidirishni boshlash</button>
     </form>
     <div id="status"></div>
-    <button id="download" type="button">JSON yuklab olish</button>
+    <button id="download" type="button">Tasdiqlangan JSON yuklab olish</button>
+    <button id="download-review" type="button">Ko'rib chiqish kerak bo'lganlarni JSON yuklab olish</button>
   </div>
 
   <div class="card" id="results-card">
@@ -138,6 +144,7 @@
   const submitBtn = document.getElementById("submit-btn");
   const statusEl = document.getElementById("status");
   const downloadBtn = document.getElementById("download");
+  const downloadReviewBtn = document.getElementById("download-review");
   const resultsCard = document.getElementById("results-card");
   const resultsTitle = document.getElementById("results-title");
   const resultsBody = document.getElementById("results-body");
@@ -198,23 +205,31 @@
   })();
 
   let lastImportFile = null;
+  let lastReviewFile = null;
 
-  downloadBtn.addEventListener("click", () => {
-    // Built from the JSON this page already received in the /api/run
-    // response — not fetched again from the server — so the download
-    // always works even if the server's own copy of the file is gone by
-    // the time the button is clicked (e.g. a host with no persistent disk
-    // that restarted the container in between).
-    if (!lastImportFile) return;
-    const blob = new Blob([JSON.stringify(lastImportFile, null, 2)], { type: "application/json" });
+  // Built from JSON this page already received in the /api/run response —
+  // not fetched again from the server — so the download always works even
+  // if the server's own copy of the file is gone by the time the button is
+  // clicked (e.g. a host with no persistent disk that restarted the
+  // container in between).
+  function downloadJson(data, filename) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "bilimon-import.json";
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+  }
+
+  downloadBtn.addEventListener("click", () => {
+    if (lastImportFile) downloadJson(lastImportFile, "bilimon-import.json");
+  });
+
+  downloadReviewBtn.addEventListener("click", () => {
+    if (lastReviewFile) downloadJson(lastReviewFile, "bilimon-needs-review.json");
   });
 
   form.addEventListener("submit", async (e) => {
@@ -226,6 +241,7 @@
     statusEl.className = "";
     statusEl.textContent = "";
     downloadBtn.style.display = "none";
+    downloadReviewBtn.style.display = "none";
     resultsCard.style.display = "none";
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<span class="spinner"></span>Qidirilmoqda... (bir necha daqiqa vaqt olishi mumkin)';
@@ -266,7 +282,14 @@
       renderResults(data.results);
 
       lastImportFile = data.importFile || null;
-      downloadBtn.style.display = lastImportFile ? "block" : "none";
+      const approvedCount = lastImportFile?.institutions?.length || 0;
+      downloadBtn.textContent = `Tasdiqlangan JSON yuklab olish (${approvedCount} ta)`;
+      downloadBtn.style.display = approvedCount > 0 ? "block" : "none";
+
+      lastReviewFile = data.reviewFile || null;
+      const reviewCount = lastReviewFile?.institutions?.length || 0;
+      downloadReviewBtn.textContent = `Ko'rib chiqish kerak bo'lganlarni JSON yuklab olish (${reviewCount} ta)`;
+      downloadReviewBtn.style.display = reviewCount > 0 ? "block" : "none";
     } catch (err) {
       statusEl.className = "error";
       statusEl.textContent = "Server bilan bog'lanib bo'lmadi: " + err.message;

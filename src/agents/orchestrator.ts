@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import type { PipelineState, StateRecord, RawExtractedFields } from "../types/index.js";
+import type { PipelineState, StateRecord, RawExtractedFields, BilimOnExportRecord } from "../types/index.js";
 import { runDiscovery, type DiscoveryCandidate } from "./discovery.js";
 import { deterministicDedupe, type DedupeCandidate } from "../services/deduplicator.js";
 import { researchMock, researchLive, mergeEvidence } from "./researcher.js";
@@ -181,6 +181,16 @@ export interface RunSummary {
    * already seen this run — the resolved scope's search space is
    * genuinely exhausted, not just under a cost/attempt ceiling. */
   searchExhausted: boolean;
+  /** Full export-shaped records for this run's NEEDS_REVIEW institutions —
+   * a record is already built (see agents/bilimon-exporter.ts) for anything
+   * that made it as far as the quality gate, it just didn't clear it. Real
+   * user complaint: the results table showed these institutions (with real
+   * name/phone/website already found), but bilimon-import.json only ever
+   * contains APPROVED records, so there was no way to get the needsReview
+   * ones out of the pipeline at all short of digging through
+   * data/processed/*.json on the server by hand. Exposed here so a caller
+   * (src/server.ts) can offer them as a separate download. */
+  needsReviewRecords: BilimOnExportRecord[];
 }
 
 type CandidateOutcome = "approved" | "needsReview" | "rejected" | "retry-pending";
@@ -268,6 +278,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
   const processedIds: string[] = [];
   const duplicateIds: string[] = [];
   const results: RunResultRow[] = [];
+  const needsReviewRecords: BilimOnExportRecord[] = [];
   let approved = 0;
   let needsReview = 0;
   let rejectedCount = 0;
@@ -576,7 +587,13 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
     });
 
     for (const cand of survivors) {
-      results.push(buildResultRow(generateId(normalizeNameKey(cand.rawName), cand.city ?? ""), cand));
+      const id = generateId(normalizeNameKey(cand.rawName), cand.city ?? "");
+      const row = buildResultRow(id, cand);
+      results.push(row);
+      if (row.status === "needsReview") {
+        const rec = readProcessedRecord(id);
+        if (rec) needsReviewRecords.push(rec);
+      }
     }
   }
 
@@ -600,6 +617,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
     results,
     shortfall,
     searchExhausted,
+    needsReviewRecords,
   };
 }
 
