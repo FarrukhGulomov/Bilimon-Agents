@@ -156,15 +156,17 @@ with zero network calls.
    (city, category/type) facet runs one web-search call that returns up to
    10 institution *profiles* — name, the page it was found on, official
    website, Instagram/Telegram/Facebook, phone, address — from official
-   sites, social pages, and the yellowpages.uz / goldenpages.uz business
-   directories. Anything the model did not actually see must come back
-   `null`; nothing is invented. Every field flows onto the
+   sites, social pages, kursi24.uz/uz (an Uzbekistan directory dedicated
+   specifically to learning/course centers — real user-suggested source,
+   checked on every search), and the general yellowpages.uz / goldenpages.uz
+   business directories. Anything the model did not actually see must come
+   back `null`; nothing is invented. Every field flows onto the
    `DiscoveryCandidate` and into the orchestrator's "fill in from discovery
    if research didn't supply it" fallback.
 2. **Deep Research (`agents/researcher.ts`).** Two sources per institution:
    a **primary** web-search-grounded research call scoped to that one named
-   institution (official site → Instagram/Telegram → yellowpages.uz /
-   goldenpages.uz), returning the full sales fact set including
+   institution (official site → Instagram/Telegram → kursi24.uz/uz →
+   yellowpages.uz / goldenpages.uz), returning the full sales fact set including
    `descriptionSourceText`; and a **supplementary**, best-effort HTML
    scrape of the URLs known for it. A refused or empty fetch is a normal,
    silent outcome — never the only path to evidence. Each evidence item

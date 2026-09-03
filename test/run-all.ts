@@ -1089,6 +1089,7 @@ console.log("15. Researcher normalizes model output and classifies sources witho
   assert(classifySourceUrl("https://t.me/example_lc") === "social", "telegram is classified as a social source");
   assert(classifySourceUrl("https://yellowpages.uz/example") === "directory", "yellowpages.uz is classified as a directory");
   assert(classifySourceUrl("https://goldenpages.uz/example") === "directory", "goldenpages.uz is classified as a directory");
+  assert(classifySourceUrl("https://kursi24.uz/uz/example-lc") === "directory", "kursi24.uz is classified as a directory (a real user-suggested source with many learning centers)");
   assert(classifySourceUrl("https://example-lc.uz/about") === "website", "an ordinary site is classified as a website");
 
   // The generalized array coercion still protects every structured search
