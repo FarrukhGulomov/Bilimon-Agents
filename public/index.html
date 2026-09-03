@@ -61,6 +61,24 @@
     margin-top: 10px;
     background: #a16207;
   }
+  #download-top {
+    display: none;
+    margin-top: 10px;
+    background: #7c3aed;
+  }
+  .checkbox-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-weight: 400;
+    font-size: 0.9rem;
+    margin-bottom: 18px;
+    cursor: pointer;
+  }
+  .checkbox-row input[type="checkbox"] {
+    width: auto;
+    margin: 2px 0 0 0;
+  }
   .spinner {
     display: inline-block;
     width: 14px;
@@ -112,11 +130,17 @@
       <label for="count">Nechta o'quv markaz</label>
       <input type="number" id="count" name="count" value="5" min="1" max="50" />
 
+      <label class="checkbox-row" for="top-only">
+        <input type="checkbox" id="top-only" name="top-only" />
+        Faqat TOP sifatli markazlarni toping (ko'proq manbadan qidirib, eng yuqori bahoga ega tanlaydi)
+      </label>
+
       <button type="submit" id="submit-btn">Qidirishni boshlash</button>
     </form>
     <div id="status"></div>
     <button id="download" type="button">Tasdiqlangan JSON yuklab olish</button>
     <button id="download-review" type="button">Ko'rib chiqish kerak bo'lganlarni JSON yuklab olish</button>
+    <button id="download-top" type="button">TOP sifatli JSON yuklab olish</button>
   </div>
 
   <div class="card" id="results-card">
@@ -130,6 +154,7 @@
             <th>Sayt</th>
             <th>Turi</th>
             <th>Shahar</th>
+            <th>Ball</th>
             <th>Holat</th>
           </tr>
         </thead>
@@ -145,6 +170,7 @@
   const statusEl = document.getElementById("status");
   const downloadBtn = document.getElementById("download");
   const downloadReviewBtn = document.getElementById("download-review");
+  const downloadTopBtn = document.getElementById("download-top");
   const resultsCard = document.getElementById("results-card");
   const resultsTitle = document.getElementById("results-title");
   const resultsBody = document.getElementById("results-body");
@@ -179,6 +205,7 @@
         <td>${website}</td>
         <td>${r.type ? escapeHtml(r.type) : "—"}</td>
         <td>${r.city ? escapeHtml(r.city) : "—"}</td>
+        <td>${typeof r.qualityScore === "number" ? r.qualityScore : "—"}</td>
         <td><span class="badge ${escapeHtml(r.status)}">${escapeHtml(status)}</span></td>
       </tr>`;
     }).join("");
@@ -206,6 +233,7 @@
 
   let lastImportFile = null;
   let lastReviewFile = null;
+  let lastTopFile = null;
 
   // Built from JSON this page already received in the /api/run response —
   // not fetched again from the server — so the download always works even
@@ -232,16 +260,22 @@
     if (lastReviewFile) downloadJson(lastReviewFile, "bilimon-needs-review.json");
   });
 
+  downloadTopBtn.addEventListener("click", () => {
+    if (lastTopFile) downloadJson(lastTopFile, "bilimon-top-institutions.json");
+  });
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const brief = document.getElementById("brief").value.trim();
     const city = citySelect.value;
     const count = Number(document.getElementById("count").value);
+    const topOnly = document.getElementById("top-only").checked;
 
     statusEl.className = "";
     statusEl.textContent = "";
     downloadBtn.style.display = "none";
     downloadReviewBtn.style.display = "none";
+    downloadTopBtn.style.display = "none";
     resultsCard.style.display = "none";
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<span class="spinner"></span>Qidirilmoqda... (bir necha daqiqa vaqt olishi mumkin)';
@@ -250,7 +284,7 @@
       const res = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brief: brief || undefined, city: city || undefined, count }),
+        body: JSON.stringify({ brief: brief || undefined, city: city || undefined, count, topOnly }),
       });
       const data = await res.json();
 
@@ -277,6 +311,10 @@
               ? "tanlangan soha/shahar bo'yicha boshqa yangi o'quv markazi topilmadi."
               : "qidiruv urinishlar chegarasiga yetdi, keyinroq qayta urinib ko'ring.");
         }
+        if (s.topOnly) {
+          const topCount = data.topFile?.institutions?.length || 0;
+          statusEl.textContent += `\nTOP sifatli: ${topCount} ta eng yuqori bahoga ega institut tanlandi.`;
+        }
       }
 
       renderResults(data.results);
@@ -290,6 +328,11 @@
       const reviewCount = lastReviewFile?.institutions?.length || 0;
       downloadReviewBtn.textContent = `Ko'rib chiqish kerak bo'lganlarni JSON yuklab olish (${reviewCount} ta)`;
       downloadReviewBtn.style.display = reviewCount > 0 ? "block" : "none";
+
+      lastTopFile = data.topFile || null;
+      const topCount = lastTopFile?.institutions?.length || 0;
+      downloadTopBtn.textContent = `TOP sifatli JSON yuklab olish (${topCount} ta)`;
+      downloadTopBtn.style.display = topCount > 0 ? "block" : "none";
     } catch (err) {
       statusEl.className = "error";
       statusEl.textContent = "Server bilan bog'lanib bo'lmadi: " + err.message;

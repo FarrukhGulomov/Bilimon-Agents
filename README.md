@@ -431,6 +431,17 @@ npm run server
   on the server by hand — `RunSummary.needsReviewRecords`
   (src/agents/orchestrator.ts) surfaces the same already-built export
   records the results table draws from.
+- **"Faqat TOP sifatli markazlarni toping" checkbox** (real user request):
+  instead of stopping once `count` institutions clear the ordinary quality
+  gate, this searches a wider net (`TOP_MODE_SEARCH_MULTIPLIER`× `count`,
+  reusing the exact same retry-until-target loop above with a bigger
+  internal target) and then keeps only the `count` highest-`qualityScore`
+  APPROVED institutions found — see `RunOptions.topOnly`/
+  `RunSummary.topRecords` in `src/agents/orchestrator.ts`. The results
+  table gets a "Ball" (score) column so the ranking is visible, not just
+  applied silently, and a third button, "TOP sifatli JSON yuklab olish (N
+  ta)", downloads just that curated subset (same envelope shape again).
+  Also available on the CLI as `pipeline run --top`.
 - Same mock-vs-real gate as the CLI: `PIPELINE_MOCK=1` runs off fixtures
   with no key needed; otherwise a missing API key returns a clear error
   instead of a crash.

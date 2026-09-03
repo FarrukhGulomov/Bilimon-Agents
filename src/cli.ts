@@ -48,18 +48,20 @@ async function cmdRun(flags: Record<string, string | boolean>) {
   const count = Number(flags.count ?? 5);
   const mock = isMock(flags);
   const brief = typeof flags.brief === "string" ? flags.brief : undefined;
+  const topOnly = Boolean(flags.top);
   if (!mock && !hasApiKey()) {
     console.error(new MissingApiKeyError().message);
     process.exitCode = 1;
     return;
   }
-  console.log(`Running pipeline: count=${count} mock=${mock}${brief ? ` brief="${brief}"` : ""}`);
+  console.log(`Running pipeline: count=${count} mock=${mock}${brief ? ` brief="${brief}"` : ""}${topOnly ? " top=true" : ""}`);
   let summary;
   try {
     summary = await runPipeline({
       count,
       mock,
       brief,
+      topOnly,
       onProgress: (p) =>
         console.log(
           `progress: processed ${p.completed}/${p.total}, approved ${p.approved}, ` +
@@ -103,6 +105,9 @@ async function cmdRun(flags: Record<string, string | boolean>) {
       `Shortfall: requested ${count}, approved ${summary.approved} (${summary.shortfall} short)` +
         (summary.searchExhausted ? " — search space exhausted for this scope." : " — hit the retry/cost ceiling.")
     );
+  }
+  if (topOnly) {
+    console.log(`Top sifatli: ${summary.topRecords.length}/${count} eng yuqori bahoga ega institut tanlandi.`);
   }
   const { importPath, reportPath, report } = finalizeExport();
   console.log(`Wrote ${importPath}`);
@@ -177,7 +182,7 @@ async function main() {
         break;
       default:
         console.log(
-          'Usage: pipeline <run|validate|export> [--count N] [--mock] [--brief "<free text>"] [--print-import]'
+          'Usage: pipeline <run|validate|export> [--count N] [--mock] [--brief "<free text>"] [--top] [--print-import]'
         );
         process.exitCode = command ? 1 : 0;
     }
