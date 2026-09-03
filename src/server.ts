@@ -104,7 +104,7 @@ async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
   runInProgress = true;
   try {
     const summary = await runPipeline({ count, mock, brief });
-    const { report } = finalizeExport();
+    const { report, importPath } = finalizeExport();
     sendJson(res, 200, {
       ok: true,
       summary: {
@@ -116,15 +116,29 @@ async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
         resolvedScope: summary.resolvedScope,
       },
       report,
+      results: summary.results,
+      // The full import file content is embedded directly in this response
+      // (not just a /api/download URL to fetch afterward) so the browser
+      // can download it from data it already has, with no dependency on a
+      // second round-trip. Real production bug: on a host with no
+      // persistent volume (e.g. Railway without an attached volume), the
+      // container's local disk can reset between requests — a restart, a
+      // redeploy, or multiple replicas each with their own ephemeral disk —
+      // so a user who successfully ran the pipeline could still get "Hali
+      // natija yo'q" from /api/download moments later, through no fault of
+      // their own. downloadUrl is kept for convenience (e.g. revisiting via
+      // curl) but the frontend no longer relies on it.
+      importFile: readImportFile(importPath),
       downloadUrl: "/api/download",
     });
   } catch (err) {
     if (isFatalProviderError(err)) {
-      const { report } = finalizeExport();
+      const { report, importPath } = finalizeExport();
       sendJson(res, 200, {
         ok: false,
         warning: `So'rov to'xtatildi: ${err.info.message}`,
         report,
+        importFile: readImportFile(importPath),
         downloadUrl: existsSync(IMPORT_FILE) ? "/api/download" : undefined,
       });
       return;
@@ -133,6 +147,14 @@ async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
     sendJson(res, 500, { error: `Ichki xatolik: ${message}` });
   } finally {
     runInProgress = false;
+  }
+}
+
+function readImportFile(importPath: string): unknown {
+  try {
+    return JSON.parse(readFileSync(importPath, "utf-8"));
+  } catch {
+    return null;
   }
 }
 
