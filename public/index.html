@@ -171,8 +171,24 @@
     resultsCard.style.display = "block";
   }
 
+  let lastImportFile = null;
+
   downloadBtn.addEventListener("click", () => {
-    window.location.href = "/api/download";
+    // Built from the JSON this page already received in the /api/run
+    // response — not fetched again from the server — so the download
+    // always works even if the server's own copy of the file is gone by
+    // the time the button is clicked (e.g. a host with no persistent disk
+    // that restarted the container in between).
+    if (!lastImportFile) return;
+    const blob = new Blob([JSON.stringify(lastImportFile, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "bilimon-import.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   });
 
   form.addEventListener("submit", async (e) => {
@@ -214,9 +230,8 @@
 
       renderResults(data.results);
 
-      if (data.downloadUrl) {
-        downloadBtn.style.display = "block";
-      }
+      lastImportFile = data.importFile || null;
+      downloadBtn.style.display = lastImportFile ? "block" : "none";
     } catch (err) {
       statusEl.className = "error";
       statusEl.textContent = "Server bilan bog'lanib bo'lmadi: " + err.message;
