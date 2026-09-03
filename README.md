@@ -360,6 +360,37 @@ Run the unit tests with `npm test` (plain tsx script, no framework):
 npm test
 ```
 
+## Web frontend
+
+`npm start` (or `npm run server` for a dev/tsx run without building) launches
+a minimal web frontend (`src/server.ts` + `public/index.html`, built on
+`node:http` — no new dependencies) instead of the one-shot CLI batch. This is
+what `npm start` runs on Railway now.
+
+```bash
+npm run build && npm start          # http://localhost:3000
+# or, without building:
+npm run server
+```
+
+- A single form: a free-text "soha / talab" field (e.g. "ingliz tili
+  bo'yicha", "IT sohasi") that becomes the same `--brief` the CLI accepts,
+  and a "nechta o'quv markaz" count (validated 1–`PIPELINE_MAX_COUNT`,
+  default ceiling 50 per request — an open form must not let one click
+  trigger an unbounded real-API-spend batch).
+- Submitting `POST /api/run` runs the exact same `runPipeline()` +
+  `finalizeExport()` used by `pipeline run`, then the page shows a
+  summary (approved/needsReview/rejected/duplicates) and a "JSON yuklab
+  olish" button that downloads `data/export/bilimon-import.json` via
+  `GET /api/download`.
+- Same mock-vs-real gate as the CLI: `PIPELINE_MOCK=1` runs off fixtures
+  with no key needed; otherwise a missing API key returns a clear error
+  instead of a crash.
+- Single run at a time (returns 409 if one is already in progress) — this
+  is an internal tool, not a multi-tenant service, and two overlapping
+  runs would race on the same `data/state`/`data/export` files.
+- The old one-shot CLI batch is still available: `npm run cli -- run --count N [--mock] [--brief "..."]` (built) or `npx tsx src/cli.ts run ...` (dev).
+
 ## Brief-driven discovery: a general-purpose product, not a 4-category tool
 
 Earlier versions of this pipeline scoped discovery to a fixed list —

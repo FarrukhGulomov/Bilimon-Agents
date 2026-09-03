@@ -72,6 +72,7 @@ import { buildExportRecord, exportFinalArtifacts } from "../src/agents/bilimon-e
 import { detectNonEducationalOrg } from "../src/services/relevance-filter.js";
 import { resolveExportIdentity, dedupeCandidates } from "../src/agents/orchestrator.js";
 import { selectResearchEvidenceSource } from "../src/agents/researcher.js";
+import { parseRunRequest } from "../src/server.js";
 import type { BilimOnExportRecord, StateRecord } from "../src/types/index.js";
 import type { DiscoveryCandidate } from "../src/agents/discovery.js";
 
@@ -1358,6 +1359,42 @@ console.log("19. Research evidence carries the real cited source URL, not the sy
   // were a real cited URL.
   const withJunk = selectResearchEvidenceSource(nameKey, ["@example_lc", "not-a-url"]);
   assert(withJunk.sourceUrl === `research://web-search/${encodeURIComponent(nameKey)}`, "non-URL-shaped cited values are filtered out, falling back to the placeholder");
+}
+
+console.log("20. Web frontend request validation (src/server.ts::parseRunRequest)");
+{
+  const ok = parseRunRequest(JSON.stringify({ brief: "ingliz tili bo'yicha", count: 3 }));
+  assert(!("error" in ok), "a well-formed {brief, count} request parses without error");
+  if (!("error" in ok)) {
+    assert(ok.brief === "ingliz tili bo'yicha", `brief is passed through trimmed (got "${ok.brief}")`);
+    assert(ok.count === 3, `count is passed through as a number (got ${ok.count})`);
+  }
+
+  const defaulted = parseRunRequest(JSON.stringify({}));
+  assert(!("error" in defaulted) && defaulted.count === 5, "count defaults to 5 when omitted");
+  assert(!("error" in defaulted) && defaulted.brief === undefined, "brief is undefined when omitted");
+
+  const emptyBrief = parseRunRequest(JSON.stringify({ brief: "   ", count: 1 }));
+  assert(!("error" in emptyBrief) && emptyBrief.brief === undefined, "a whitespace-only brief normalizes to undefined rather than an empty string");
+
+  const zero = parseRunRequest(JSON.stringify({ count: 0 }));
+  assert("error" in zero, "count=0 is rejected");
+  const negative = parseRunRequest(JSON.stringify({ count: -5 }));
+  assert("error" in negative, "a negative count is rejected");
+  const fractional = parseRunRequest(JSON.stringify({ count: 2.5 }));
+  assert("error" in fractional, "a non-integer count is rejected");
+  const tooBig = parseRunRequest(JSON.stringify({ count: 10000 }));
+  assert("error" in tooBig, "a count above the MAX_COUNT ceiling is rejected — an open web form must not let one click request an unbounded batch");
+
+  const nonStringBrief = parseRunRequest(JSON.stringify({ brief: 12345, count: 1 }));
+  assert("error" in nonStringBrief, "a non-string brief is rejected");
+
+  const badJson = parseRunRequest("{not json");
+  assert("error" in badJson, "malformed JSON body is rejected with a clear error rather than throwing");
+
+  const longBrief = "a".repeat(1000);
+  const truncated = parseRunRequest(JSON.stringify({ brief: longBrief, count: 1 }));
+  assert(!("error" in truncated) && truncated.brief!.length === 300, `an overlong brief is truncated to the MAX_BRIEF_LENGTH cap rather than rejected or passed through unbounded (got length ${!("error" in truncated) ? truncated.brief!.length : "n/a"})`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
