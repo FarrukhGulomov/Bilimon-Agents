@@ -92,7 +92,7 @@ export function loadDefaultScope(): DiscoveryScope {
 // Longer/more specific phrases are listed so accidental substring collisions
 // with category keywords (e.g. "til" inside both "til markazi" and "ingliz
 // tili") stay intentional rather than coincidental.
-const TYPE_KEYWORDS: Record<InstitutionType, string[]> = {
+export const TYPE_KEYWORDS: Record<InstitutionType, string[]> = {
   SCHOOL: ["maktab", "maktablar", "school", "schools", "школа", "школы", "школ"],
   LYCEUM: ["litsey", "litseylar", "lyceum", "lyceums", "лицей", "лицеи", "лицея"],
   LANGUAGE_CENTER: [
@@ -110,7 +110,7 @@ const TYPE_KEYWORDS: Record<InstitutionType, string[]> = {
 };
 
 // Uzbek / Russian / English keyword phrases for each real `categories` value.
-const CATEGORY_KEYWORDS: Record<Category, string[]> = {
+export const CATEGORY_KEYWORDS: Record<Category, string[]> = {
   IELTS: ["ielts"],
   SCHOOL_SUBJECTS: ["maktab fanlari", "school subjects", "школьные предметы", "школьные предметы"],
   UNIVERSITY_PREP: [
@@ -139,7 +139,7 @@ const CATEGORY_KEYWORDS: Record<Category, string[]> = {
   PROFESSIONAL_CERTIFICATION: ["sertifikat", "sertifikatlash", "certification", "professional certification", "сертифика"],
 };
 
-function matchKeywords<T extends string>(
+export function matchKeywords<T extends string>(
   briefLower: string,
   table: Record<T, string[]>
 ): { matched: T[]; hits: string[] } {

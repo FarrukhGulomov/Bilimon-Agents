@@ -46,7 +46,7 @@ export interface DiscoveredInstitution {
   city?: string;
   category?: string;
   sourceUrl?: string;
-  sourceType: "web_search" | "fixture" | "manual";
+  sourceType: "web_search" | "fixture" | "manual" | "kursi24_scrape";
   notes?: string;
   discoveredAt: string;
 }

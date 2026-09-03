@@ -163,6 +163,29 @@ with zero network calls.
    back `null`; nothing is invented. Every field flows onto the
    `DiscoveryCandidate` and into the orchestrator's "fill in from discovery
    if research didn't supply it" fallback.
+1b. **kursi24.uz deterministic scraper (`services/kursi24.ts`) — a separate,
+   additional discovery source (real user request, 2026-09-03).** Tried
+   first in `discoverLive()`, before the LLM-search facets above, since it
+   costs nothing per institution (no LLM call at all): fetches
+   `kursi24.uz/uz/centre/<slug>` pages directly and parses name, address
+   (and a city derived from its first segment), phone, website, Instagram/
+   Telegram/Facebook, course/category labels, lat/lng, and a real
+   description paragraph — all with plain regex selectors verified against
+   an actual captured page the user supplied
+   (`data/reference/kursi24-sample-detail.html`, offline-tested in
+   `test/run-all.ts` against that real content, not a guessed shape). This
+   pipeline has not verified kursi24.uz's category/listing-page markup, so
+   rather than guessing that structure, `crawlKursi24()` grows its frontier
+   purely from each page's own confirmed "Yaqin atrofdagi o'quv markazlari"
+   (nearby learning centers) links, starting from `KURSI24_SEED_URLS`. A
+   city-scoped brief hard-filters these the same way the live-search facets
+   do; category/type scope deliberately does NOT filter them, since
+   kursi24's own category labels only map onto the real enum via lossy
+   keyword matching (`inferCategoriesFromLabels`/`inferTypesFromLabels`,
+   reusing `brief-parser.ts`'s own keyword tables) — filtering on that would
+   silently discard most of kursi24's real data under the default scope,
+   defeating the point of this source. Only the shortfall below `count` is
+   filled by the LLM-search facet loop.
 2. **Deep Research (`agents/researcher.ts`).** Two sources per institution:
    a **primary** web-search-grounded research call scoped to that one named
    institution (official site → Instagram/Telegram → kursi24.uz/uz →

@@ -14,12 +14,19 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { searchInstitutions, type DiscoverySearchResult } from "../services/search.js";
-import { listCities } from "../services/location-mapper.js";
+import { listCities, resolveCity } from "../services/location-mapper.js";
 import { loadDefaultScope, type DiscoveryScope } from "../services/brief-parser.js";
 import { runWithConcurrency } from "../services/concurrency.js";
 import { loadExecutionConfig } from "../services/execution-config.js";
 import { CATEGORIES, type InstitutionType, type Category } from "../schemas/enums.js";
 import { isFatalProviderError } from "../services/llm-client.js";
+import {
+  crawlKursi24,
+  inferCategoriesFromLabels,
+  inferTypesFromLabels,
+  KURSI24_SEED_URLS,
+  type Kursi24Listing,
+} from "../services/kursi24.js";
 import type { DiscoveredInstitution } from "../types/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -64,6 +71,16 @@ export interface DiscoveryCandidate extends DiscoveredInstitution {
    * Agent 2, never exported. */
   facebook?: string | null;
   address?: string | null;
+  /** Present only for sourceType "kursi24_scrape" — deterministically parsed
+   * from the listing's embedded map coordinates, not geocoded/guessed. */
+  lat?: number | null;
+  lng?: number | null;
+  /** Real prose describing the institution, taken verbatim from its
+   * kursi24.uz listing page (sourceType "kursi24_scrape" only) — the same
+   * role EvidenceItem.extractedFields.descriptionSourceText plays for
+   * research evidence, carried this early because the scrape already IS a
+   * primary-source page read, not a search summary. */
+  descriptionSourceText?: string | null;
 }
 
 /**
@@ -206,10 +223,81 @@ interface SearchUnit {
   city: ReturnType<typeof listCities>[number];
 }
 
+/** Maps one kursi24.uz listing onto a DiscoveryCandidate. Pure and exported
+ * so the mapping is testable offline without a network call. */
+export function mapKursi24ListingToCandidate(listing: Kursi24Listing): DiscoveryCandidate {
+  const categories = inferCategoriesFromLabels(listing.categoryLabels);
+  const types = inferTypesFromLabels(listing.categoryLabels);
+  return {
+    discoveryId: listing.url,
+    rawName: listing.name ?? "",
+    city: listing.city ?? undefined,
+    category: categories[0],
+    type: types[0],
+    sourceUrl: listing.url,
+    sourceType: "kursi24_scrape",
+    notes: listing.categoryLabels.length > 0 ? listing.categoryLabels.join(", ") : undefined,
+    phone: listing.phone,
+    website: listing.website,
+    telegram: listing.telegram,
+    instagram: listing.instagram,
+    facebook: listing.facebook,
+    address: listing.address,
+    lat: listing.lat,
+    lng: listing.lng,
+    descriptionSourceText: listing.descriptionSourceText,
+    discoveredAt: new Date().toISOString(),
+  };
+}
+
+/** City scope is a hard filter here, same as the live-search facet loop
+ * below — a real, reliably-derived city name (from the address's own first
+ * segment) makes this as trustworthy as the live-search path's city
+ * targeting. Category/type scope is deliberately NOT filtered: kursi24's own
+ * category labels only map onto the real enum via keyword matching (see
+ * inferCategoriesFromLabels), which is necessarily lossy — an unscoped
+ * default brief's 4 priority categories would otherwise silently discard
+ * most kursi24 institutions whose label just didn't hit a keyword, defeating
+ * the entire point of this source (surfacing as much of kursi24.uz's real
+ * data as possible). An uncategorized candidate still flows through
+ * normally; later stages (research/quality gate) fill categories in. */
+function kursi24CandidateInScope(cand: DiscoveryCandidate, scope: DiscoveryScope): boolean {
+  if (scope.regions === "all") return true;
+  if (!cand.city) return false;
+  const resolved = resolveCity(cand.city);
+  if (!resolved) return false;
+  return (scope.regions as string[]).includes(resolved.cityName);
+}
+
 export async function discoverLive(
   count: number,
   scope: DiscoveryScope = loadDefaultScope()
 ): Promise<DiscoveryCandidate[]> {
+  const results: DiscoveryCandidate[] = [];
+
+  // kursi24.uz scrape — a separate, additional discovery source (real user
+  // request, 2026-09-03): deterministic and free (no LLM call at all), so
+  // tried first; only the shortfall is filled by the LLM-search facet loop
+  // below.
+  try {
+    const listings = await crawlKursi24(KURSI24_SEED_URLS, count);
+    let kursi24Found = 0;
+    for (const listing of listings) {
+      const cand = mapKursi24ListingToCandidate(listing);
+      if (!kursi24CandidateInScope(cand, scope)) continue;
+      results.push(cand);
+      kursi24Found++;
+      if (results.length >= count) break;
+    }
+    if (kursi24Found > 0) {
+      console.log(`Discovery: kursi24.uz scrape found ${kursi24Found} candidate(s) in scope.`);
+    }
+  } catch (err) {
+    console.warn(`Discovery: kursi24.uz scrape failed — ${(err as Error).message}`);
+  }
+
+  if (results.length >= count) return results.slice(0, count);
+
   const facets = buildSearchFacets(scope);
   // A brief naming a specific city (e.g. "Toshkentda") is a HARD filter
   // here, not just a hint: it bounds how many (facet, city) live-search
@@ -227,7 +315,6 @@ export async function discoverLive(
   for (const facet of facets) for (const city of effectiveCities) units.push({ facet, city });
 
   const { maxConcurrency } = loadExecutionConfig();
-  const results: DiscoveryCandidate[] = [];
   let searchesStarted = 0;
   // Set when a search hits a fatal provider error (bad key / no credits).
   // Every remaining search would fail identically, so stop pulling new work

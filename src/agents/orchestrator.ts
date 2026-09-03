@@ -403,6 +403,16 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
       // and in live mode Agent 1 now often has it from a yellowpages.uz /
       // goldenpages.uz listing even when research came back without one.
       if (!fields.address && cand.address) fields.address = cand.address;
+      // kursi24.uz-scraped candidates (services/kursi24.ts) carry real,
+      // page-verified lat/lng and description text — a primary-source page
+      // read, not a search summary — so they're as trustworthy as anything
+      // research would find, and fill in the same way when research came
+      // back without them.
+      if (!fields.lat && cand.lat) fields.lat = cand.lat;
+      if (!fields.lng && cand.lng) fields.lng = cand.lng;
+      if (!fields.descriptionSourceText && cand.descriptionSourceText) {
+        fields.descriptionSourceText = cand.descriptionSourceText;
+      }
 
       // Real production bug: `nameKey`/`slug` above are computed from
       // `cand.rawName` at DISCOVERY time, before research runs — and a live
