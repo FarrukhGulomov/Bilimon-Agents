@@ -78,18 +78,28 @@ in all 302 real records, so their real per-element schema is genuinely
 unconfirmed — kept as `unknown[]` rather than carrying forward an invented
 shape.
 
-**`id` field convention — CONFIRMED**: the 302 real records all carry
-cuid-style `id`s (e.g. `cmrfw8t5o001an3ogocewc8g6`). The user has confirmed
-that **BilimOn's own backend assigns this `id` when a record is imported** —
-this pipeline never generates or guesses a real cuid. Every record this
-pipeline exports therefore leaves `id: null` and relies on BilimOn's own
-import to assign the real id — see the doc comment on
-`BilimOnExportRecord.id` in `src/types/index.ts` and
-`agents/bilimon-exporter.ts::buildExportRecord`. This is no longer an open
-question. Pipeline-internal state tracking uses a separate, clearly
-`pipeline-`-prefixed id (`services/normalizer.ts::generateId`) used only to
-key `data/state|processed|review/<id>.json` — that id is never written to
-the exported record's `id` field.
+**`id` field convention — REVISED (real production evidence overrode an
+earlier assumption)**: the 302 real records all carry cuid-style `id`s (e.g.
+`cmrfw8t5o001an3ogocewc8g6`). It was earlier believed (and explicitly
+user-confirmed at the time) that BilimOn's own backend assigns this `id` on
+import, so every exported record left `id: null`. A user then uploaded an
+actual exported `bilimon-import.json` to BilimOn's real production import
+endpoint (`POST /api/v1/super-admin/import/institutions`) and got a 400:
+`{"code":"invalid_type","expected":"string","received":"null",
+"path":["institutions",0,"id"]}` — the endpoint requires the client to
+supply a non-null id string. Every record this pipeline exports now carries
+a fresh cuid-shaped id generated client-side
+(`services/normalizer.ts::generateBilimonRecordId` — 25 chars, `c` +
+24 lowercase alphanumeric, matching the real export's shape; not an actual
+`cuid()` algorithm, since the one 400 only confirmed "must be a non-null
+string", not a specific format, but matching the real shape is the safest
+bet against any further server-side validation that error didn't reveal).
+See the doc comment on `BilimOnExportRecord.id` in `src/types/index.ts` and
+`agents/bilimon-exporter.ts::buildExportRecord`. Pipeline-internal state
+tracking uses a separate, clearly `pipeline-`-prefixed id
+(`services/normalizer.ts::generateId`) used only to key
+`data/state|processed|review/<id>.json` — that id is never written to the
+exported record's `id` field.
 
 ## Fixtures vs. real data
 
@@ -173,8 +183,10 @@ with zero network calls.
    superlative or ranking claims unless the evidence itself carries a
    third-party claim, and `null` + `needsContentReview` when material is
    genuinely too thin.
-4. **Exporter (`agents/bilimon-exporter.ts`).** Unchanged: maps merged
-   fields to the real BilimOn schema, `id: null` on export.
+4. **Exporter (`agents/bilimon-exporter.ts`).** Maps merged fields to the
+   real BilimOn schema, generating a fresh cuid-shaped `id` on export (see
+   the "`id` field convention" note above — BilimOn's real import endpoint
+   rejects `id: null`).
 
 Provider failures are contained at each boundary: an ordinary failure
 costs only its own search or institution (logged as one warning), while a
@@ -395,18 +407,30 @@ npm run server
   retry-until-target behavior above, so the count you type is what you
   actually get back whenever the resolved scope has enough real
   institutions in it — then the page shows a per-institution results
-  table (name/phone/website/type/city/status) and a "JSON yuklab olish"
-  button. That button builds the download from the full import file
-  content already embedded in the `/api/run` response (a `Blob`, no
-  second request) rather than fetching `GET /api/download` separately —
-  real production bug: on a host with no persistent volume, that file
-  could be gone from disk by the time the button was clicked (a restart,
-  redeploy, or a different replica's own ephemeral disk), so a user who
-  had just gotten real results back saw "Hali natija yo'q" trying to
-  download them. If the target wasn't fully met, the summary line says so
-  plainly (how many were requested, how many approved, and whether the
-  search space ran out or the retry/cost ceiling was hit) instead of
-  silently handing back fewer than asked for.
+  table (name/phone/website/type/city/status) and a "Tasdiqlangan JSON
+  yuklab olish (N ta)" button. That button builds the download from the
+  full import file content already embedded in the `/api/run` response
+  (a `Blob`, no second request) rather than fetching `GET /api/download`
+  separately — real production bug: on a host with no persistent volume,
+  that file could be gone from disk by the time the button was clicked (a
+  restart, redeploy, or a different replica's own ephemeral disk), so a
+  user who had just gotten real results back saw "Hali natija yo'q"
+  trying to download them. If the target wasn't fully met, the summary
+  line says so plainly (how many were requested, how many approved, and
+  whether the search space ran out or the retry/cost ceiling was hit)
+  instead of silently handing back fewer than asked for.
+- The results table also lists NEEDS_REVIEW institutions (they already
+  have a real name/phone/website found — they just didn't clear the
+  quality gate), and a separate "Ko'rib chiqish kerak bo'lganlarni JSON
+  yuklab olish (N ta)" button downloads those too, in the same
+  `{version, exportedAt, institutions}` envelope as the approved file.
+  Real user complaint this fixes: `bilimon-import.json` only ever
+  contains APPROVED records by design (see "Schema status: REAL" above),
+  so there was previously no way to get the needsReview institutions out
+  of the pipeline at all short of digging through `data/processed/*.json`
+  on the server by hand — `RunSummary.needsReviewRecords`
+  (src/agents/orchestrator.ts) surfaces the same already-built export
+  records the results table draws from.
 - Same mock-vs-real gate as the CLI: `PIPELINE_MOCK=1` runs off fixtures
   with no key needed; otherwise a missing API key returns a clear error
   instead of a crash.
@@ -553,8 +577,10 @@ blockers:
 - **Real schema ✅ resolved.** The schema, enums, and city/region ids are
   now derived from and verified against the actual 302-record BilimOn
   export (see "Schema status: REAL" above) — this is no longer a blocker.
-  The `id` field convention is also now confirmed (BilimOn assigns `id` on
-  import; see "Schema status: REAL" above) — no open questions remain here.
+  The `id` field convention is also resolved (this pipeline generates a
+  fresh cuid-shaped `id` itself — BilimOn's real import endpoint rejects
+  `id: null`; see "Schema status: REAL" above) — no open questions remain
+  here.
 - **Real city/region ids for 8 of ~14 regions ✅.** Navoiy,
   Termez/Surxondaryo, Guliston/Sirdaryo, Urganch/Xorazm, and
   Nukus/Qoraqalpog'iston have no real ids yet (see the coverage-gap note

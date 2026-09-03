@@ -3,9 +3,10 @@
  * at data/reference/bilimon-institutions-reference.json (302 institutions,
  * exported 2026-08-31). Every value below was counted directly from that
  * file, not guessed. See README.md "Schema status: REAL" for the full
- * verification method, including the CONFIRMED `id` field convention
- * (BilimOn assigns `id` on import, this pipeline never sets it — see
- * src/services/normalizer.ts and src/types/index.ts).
+ * verification method, including the `id` field convention (this pipeline
+ * generates a fresh cuid-shaped `id` itself — BilimOn's real import
+ * endpoint rejects `id: null` — see src/services/normalizer.ts and
+ * src/types/index.ts).
  *
  * Caveat: the reference export only covers 8 of Uzbekistan's ~14 regions
  * (see src/schemas/locations.ts), so enum members that happen to have zero

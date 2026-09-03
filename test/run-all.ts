@@ -30,7 +30,7 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { slugify, normalizePhone, generateId, generateDuplicateBookkeepingId, normalizeNameKey, normalizeLanguages, normalizeLanguageCode } from "../src/services/normalizer.js";
+import { slugify, normalizePhone, generateId, generateDuplicateBookkeepingId, generateBilimonRecordId, normalizeNameKey, normalizeLanguages, normalizeLanguageCode } from "../src/services/normalizer.js";
 import { resolveCity } from "../src/services/location-mapper.js";
 import { deterministicDedupe } from "../src/services/deduplicator.js";
 import { validateRecord, validateBatch } from "../src/services/validator.js";
@@ -1181,7 +1181,7 @@ console.log("17. exportFinalArtifacts() re-validates the approved batch before w
   }
   function makeRecord(id: string, nameUz: string): BilimOnExportRecord {
     return {
-      id: null,
+      id,
       nameUz,
       nameRu: nameUz,
       nameKey: normalizeNameKey(nameUz),
@@ -1424,6 +1424,28 @@ console.log("21. Retry-until-target discovery ceiling (src/agents/orchestrator.t
   assert(maxTotalRaw(10) === 40, `count*4 dominates once count is large enough (got ${maxTotalRaw(10)})`);
   assert(maxTotalRaw(50) === 200, `the ceiling caps out at 200 rather than scaling unboundedly with count (got ${maxTotalRaw(50)})`);
   assert(maxTotalRaw(1000) === 200, `an oversized count is still capped at 200 (got ${maxTotalRaw(1000)})`);
+}
+
+console.log("22. Exported records carry a real id — BilimOn's import endpoint rejects id:null (src/services/normalizer.ts::generateBilimonRecordId)");
+{
+  // Real production bug: a user uploaded a downloaded bilimon-import.json
+  // straight to BilimOn's actual production import endpoint (POST
+  // /api/v1/super-admin/import/institutions) and got back a 400:
+  // {"code":"invalid_type","expected":"string","received":"null",
+  // "path":["institutions",0,"id"]} — disproving the earlier assumption
+  // that BilimOn assigns the id itself. Every exported record must now
+  // carry a non-null id string.
+  const id1 = generateBilimonRecordId();
+  const id2 = generateBilimonRecordId();
+  assert(/^c[a-z0-9]{24}$/.test(id1), `generateBilimonRecordId() produces a 25-char cuid-shaped id matching the real reference export's format (got "${id1}", length ${id1.length})`);
+  assert(id1 !== id2, "two calls produce different ids");
+
+  const baseFields = { nameLatin: "Star Kids International", city: "Tashkent" };
+  const baseContent = { descriptionUz: null, descriptionRu: null, needsContentReview: false };
+  const built = buildExportRecord("id-idcheck", "star-kids-international", "star kids international", baseFields, baseContent);
+  assert(built.record !== null, "sanity: this candidate builds successfully");
+  assert(typeof built.record?.id === "string" && built.record.id.length > 0, `buildExportRecord() no longer leaves id:null — it's a real generated string (got ${JSON.stringify(built.record?.id)})`);
+  assert(BilimOnExportRecordZ.safeParse(built.record).success, "the built record (with its generated id) validates against the real zod schema, which now requires id to be a non-null string");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

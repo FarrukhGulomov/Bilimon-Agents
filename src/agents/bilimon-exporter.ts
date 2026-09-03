@@ -17,7 +17,7 @@ import type {
 } from "../types/index.js";
 import type { ContentResult } from "./content-manager.js";
 import { resolveCity } from "../services/location-mapper.js";
-import { normalizePhone, normalizeUrl, normalizeLanguages } from "../services/normalizer.js";
+import { normalizePhone, normalizeUrl, normalizeLanguages, generateBilimonRecordId } from "../services/normalizer.js";
 import { detectNonEducationalOrg } from "../services/relevance-filter.js";
 import { getTokenUsage } from "../services/llm-client.js";
 import { readLastScope } from "../services/scope-store.js";
@@ -45,10 +45,10 @@ export interface BuildRecordResult {
  *
  * `id` here is the pipeline-internal id (see services/normalizer.ts) used
  * only for state/processed/review filenames — it is deliberately NOT
- * written into the returned record's `id` field. CONFIRMED convention (see
- * BilimOnExportRecord.id in src/types/index.ts): BilimOn's own backend
- * assigns the real cuid `id` when a record is imported, so this pipeline
- * never generates or guesses one — every exported record leaves `id: null`.
+ * written into the returned record's `id` field. See BilimOnExportRecord.id
+ * in src/types/index.ts: the returned record's `id` is instead a fresh
+ * cuid-shaped id from generateBilimonRecordId(), since BilimOn's real
+ * import endpoint rejects `id: null`.
  */
 export function buildExportRecord(
   id: string,
@@ -103,7 +103,15 @@ export function buildExportRecord(
   }
 
   const record: BilimOnExportRecord = {
-    id: null, // CONFIRMED: BilimOn assigns id on import — see doc comment on BilimOnExportRecord.id
+    // Real production bug: this used to be `null` on the (explicitly
+    // user-confirmed, at the time) assumption that BilimOn's backend
+    // assigns the real cuid on import. BilimOn's actual production import
+    // endpoint (POST /api/v1/super-admin/import/institutions) rejected that
+    // with a 400: `{"code":"invalid_type","expected":"string",
+    // "received":"null","path":["institutions",0,"id"]}` — it requires the
+    // client to supply an id string. See generateBilimonRecordId()'s doc
+    // comment in services/normalizer.ts.
+    id: generateBilimonRecordId(),
     nameUz: fields.nameUz ?? fields.nameLatin!,
     nameRu: fields.nameRu ?? fields.nameUz ?? fields.nameLatin!,
     nameKey,

@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import { runPipeline, finalizeExport } from "./agents/orchestrator.js";
 import { MissingApiKeyError, hasApiKey, isFatalProviderError } from "./services/llm-client.js";
 import { listCities } from "./services/location-mapper.js";
+import type { BilimOnExportRecord } from "./types/index.js";
 
 // Uzbek display labels for the frontend's city dropdown, keyed by the real
 // CitySeed.nameEn (src/schemas/locations.ts) so the dropdown's option value
@@ -165,6 +166,13 @@ async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
       // their own. downloadUrl is kept for convenience (e.g. revisiting via
       // curl) but the frontend no longer relies on it.
       importFile: readImportFile(importPath),
+      // Real user complaint: the results table shows NEEDS_REVIEW
+      // institutions too (they already have a real name/phone/website
+      // found), but bilimon-import.json only ever contains APPROVED
+      // records — there was no way to get the needsReview ones out of the
+      // pipeline at all. Same envelope shape as importFile so a human
+      // reviewing them can compare directly, just a separate file/button.
+      reviewFile: buildReviewFile(summary.needsReviewRecords),
       downloadUrl: "/api/download",
     });
   } catch (err) {
@@ -192,6 +200,10 @@ function readImportFile(importPath: string): unknown {
   } catch {
     return null;
   }
+}
+
+function buildReviewFile(records: BilimOnExportRecord[]): unknown {
+  return { version: 1, exportedAt: new Date().toISOString(), institutions: records };
 }
 
 function handleApiCities(res: ServerResponse) {
