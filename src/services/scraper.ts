@@ -18,6 +18,12 @@ export interface CachedPage {
   fetchedAt: string;
   status: number | null;
   text: string;
+  /** Raw HTML (capped, same bound as `text`'s source), for callers that need
+   * actual markup to parse structured fields deterministically (e.g.
+   * services/kursi24.ts) rather than `text`'s tag-stripped prose. Absent on
+   * cache entries written before this field existed, and on a failed fetch
+   * (see failEntry) — always check for undefined/empty. */
+  html?: string;
   error?: string;
 }
 
@@ -365,6 +371,7 @@ export async function fetchAndCache(url: string): Promise<CachedPage> {
       fetchedAt: new Date().toISOString(),
       status: res.status,
       text: htmlToText(html).slice(0, 20000),
+      html: html.slice(0, maxBytes),
       error: res.ok ? undefined : `HTTP ${res.status}`,
     };
     writeCache(entry);

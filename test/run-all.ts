@@ -56,7 +56,8 @@ import {
   isFatalProviderError,
 } from "../src/services/llm-client.js";
 import { resolveBriefHeuristic, loadDefaultScope, resolveBrief } from "../src/services/brief-parser.js";
-import { discoverMock, mapSearchResultToCandidate } from "../src/agents/discovery.js";
+import { discoverMock, mapSearchResultToCandidate, mapKursi24ListingToCandidate } from "../src/agents/discovery.js";
+import { parseKursi24DetailPage, inferCategoriesFromLabels, inferTypesFromLabels } from "../src/services/kursi24.js";
 import { buildScopeInstruction } from "../src/services/search.js";
 import { assessContentMaterial } from "../src/agents/content-manager.js";
 import { classifySourceUrl, normalizeResearchFields, scoreEvidenceItems } from "../src/agents/researcher.js";
@@ -1455,6 +1456,56 @@ console.log("22. Exported records carry a real id — BilimOn's import endpoint 
   assert(built.record !== null, "sanity: this candidate builds successfully");
   assert(typeof built.record?.id === "string" && built.record.id.length > 0, `buildExportRecord() no longer leaves id:null — it's a real generated string (got ${JSON.stringify(built.record?.id)})`);
   assert(BilimOnExportRecordZ.safeParse(built.record).success, "the built record (with its generated id) validates against the real zod schema, which now requires id to be a non-null string");
+}
+
+console.log("23. kursi24.uz scraper parses a real captured page correctly (src/services/kursi24.ts)");
+{
+  // Real user-supplied page source of
+  // https://kursi24.uz/uz/centre/result-english-school — every assertion
+  // below is checked against ACTUAL site content, not a guessed shape.
+  const fixturePath = join(__dirname, "..", "data", "reference", "kursi24-sample-detail.html");
+  const html = readFileSync(fixturePath, "utf-8");
+  const url = "https://kursi24.uz/uz/centre/result-english-school";
+  const listing = parseKursi24DetailPage(html, url);
+
+  assert(listing.name === "RESULT ENGLISH SCHOOL", `name is parsed from the real page (got "${listing.name}")`);
+  assert(listing.address === "Ташкент, ул. Мирзо Улугбека, 54/2", `address is parsed verbatim, including that this source gives it in Russian even on the /uz/ page (got "${listing.address}")`);
+  assert(listing.city === "Ташкент", `city is derived from the address's first comma-separated segment (got "${listing.city}")`);
+  assert(listing.phone === "+998555145252", `phone is parsed from the numbers-popup's real tel: link, not the masked "+9989 ..." display text (got "${listing.phone}")`);
+  assert(listing.website === "https://result-school.uz/", `website is parsed from the social-links block (got "${listing.website}")`);
+  assert(listing.instagram?.includes("instagram.com/result_school_uz"), `instagram is parsed (got "${listing.instagram}")`);
+  assert(listing.facebook === "https://www.facebook.com/ResultUz", `facebook is parsed (got "${listing.facebook}")`);
+  assert(listing.telegram === "https://t.me/result_school_uz", `telegram is parsed (got "${listing.telegram}")`);
+  assert(JSON.stringify(listing.categoryLabels) === JSON.stringify(["Ingliz tili"]), `category labels are parsed (got ${JSON.stringify(listing.categoryLabels)})`);
+  assert(listing.lat !== null && Math.abs(listing.lat - 41.324558275933) < 1e-6, `lat is parsed from the embedded map coordinates (got ${listing.lat})`);
+  assert(listing.lng !== null && Math.abs(listing.lng - 69.324966491335) < 1e-6, `lng is parsed from the embedded map coordinates (got ${listing.lng})`);
+  assert(!!listing.descriptionSourceText?.includes("Result o'quv markazi 2017 yildan beri"), `descriptionSourceText is parsed as real prose from the page (got "${listing.descriptionSourceText?.slice(0, 60)}...")`);
+  assert(!listing.descriptionSourceText?.includes("<"), "descriptionSourceText has no leftover HTML tags");
+  assert(
+    JSON.stringify(listing.nearbyUrls) ===
+      JSON.stringify([
+        "https://kursi24.uz/uz/centre/cambridge-learning-centre-naprotiv-gostinitsy-radisson",
+        "https://kursi24.uz/uz/centre/level-promotion",
+        "https://kursi24.uz/uz/centre/unlock-language-studio",
+      ]),
+    `nearby-centers links are parsed as the crawl frontier (got ${JSON.stringify(listing.nearbyUrls)})`
+  );
+
+  // A page with none of these blocks (e.g. a 404 or an unrelated page)
+  // degrades to all-null/empty rather than throwing.
+  const empty = parseKursi24DetailPage("<html><body>not a listing page</body></html>", "https://kursi24.uz/uz/nothing");
+  assert(empty.name === null && empty.phone === null && empty.nearbyUrls.length === 0, "a non-listing page degrades to null/empty fields rather than throwing");
+
+  assert(JSON.stringify(inferCategoriesFromLabels(["Ingliz tili"])) === JSON.stringify(["LANGUAGES"]), `"Ingliz tili" maps to the LANGUAGES category via the same keyword table brief-parser.ts uses (got ${JSON.stringify(inferCategoriesFromLabels(["Ingliz tili"]))})`);
+  assert(inferCategoriesFromLabels(["Something Unrecognized"]).length === 0, "an unrecognized label maps to no category rather than a guess");
+  assert(inferTypesFromLabels(["Ingliz tili"]).length === 0, "a category-only label infers no institution type (expected — kursi24's category links don't distinguish institution type)");
+
+  const cand = mapKursi24ListingToCandidate(listing);
+  assert(cand.sourceType === "kursi24_scrape", "the mapped candidate is tagged with the kursi24_scrape source type");
+  assert(cand.rawName === "RESULT ENGLISH SCHOOL", "the mapped candidate carries the real name");
+  assert(cand.phone === "+998555145252" && cand.website === "https://result-school.uz/", "the mapped candidate carries the real contact fields");
+  assert(cand.category === "LANGUAGES", "the mapped candidate carries the inferred category");
+  assert(cand.descriptionSourceText?.includes("Result o'quv markazi"), "the mapped candidate carries the real description text");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
