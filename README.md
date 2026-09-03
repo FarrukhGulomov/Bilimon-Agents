@@ -155,21 +155,27 @@ with zero network calls.
 1. **Discovery (`agents/discovery.ts` + `services/search.ts`).** Each
    (city, category/type) facet runs one web-search call that returns up to
    10 institution *profiles* — name, the page it was found on, official
-   website, Instagram/Telegram/Facebook, phone, address — from official
-   sites, social pages, kursi24.uz/uz (an Uzbekistan directory dedicated
-   specifically to learning/course centers — real user-suggested source,
-   checked on every search), and the general yellowpages.uz / goldenpages.uz
-   business directories. Anything the model did not actually see must come
-   back `null`; nothing is invented. Every field flows onto the
-   `DiscoveryCandidate` and into the orchestrator's "fill in from discovery
-   if research didn't supply it" fallback.
+   website, Instagram/Telegram/Facebook, phone, address.
+   **TEMPORARY source restriction (per explicit user request, 2026-09-03):**
+   general web search (official sites, social pages, yellowpages.uz/
+   goldenpages.uz) was returning low-quality/irrelevant results, so
+   discovery, per-institution research, and the supplementary scrape are all
+   currently restricted to **kursi24.uz/uz only** (an Uzbekistan directory
+   dedicated specifically to learning/course centers) — see the "TEMPORARY"
+   comments in `services/search.ts`, `services/llm-client.ts::
+   researchInstitutionViaWebSearch`, and `agents/researcher.ts::
+   buildScrapeTargets` for exactly what's gated and how to revert it (git
+   history has the prior multi-source version of each). Anything the model
+   did not actually see must come back `null`; nothing is invented. Every
+   field flows onto the `DiscoveryCandidate` and into the orchestrator's
+   "fill in from discovery if research didn't supply it" fallback.
 2. **Deep Research (`agents/researcher.ts`).** Two sources per institution:
    a **primary** web-search-grounded research call scoped to that one named
-   institution (official site → Instagram/Telegram → kursi24.uz/uz →
-   yellowpages.uz / goldenpages.uz), returning the full sales fact set including
-   `descriptionSourceText`; and a **supplementary**, best-effort HTML
-   scrape of the URLs known for it. A refused or empty fetch is a normal,
-   silent outcome — never the only path to evidence. Each evidence item
+   institution, currently restricted to kursi24.uz/uz only (see above),
+   returning the full sales fact set including `descriptionSourceText`; and
+   a **supplementary**, best-effort HTML scrape of the URLs known for it
+   (also currently filtered to kursi24.uz/uz URLs only). A refused or empty
+   fetch is a normal, silent outcome — never the only path to evidence. Each evidence item
    then gets a confidence derived from its source kind, how much
    substantive detail it actually yielded, and how many identifying facts
    (phone/website/address) another source independently corroborates

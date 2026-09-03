@@ -171,14 +171,18 @@ export async function searchInstitutions(
     type ? TYPE_LABELS[type as InstitutionType] : undefined,
   ].filter(Boolean);
   const facetText = facetLabels.length > 0 ? facetLabels.join(" / ") : "ta'lim markazi / образовательный центр / learning center";
+  // TEMPORARY (per explicit user request, 2026-09-03): general web search
+  // (official sites, social pages, yellowpages.uz/goldenpages.uz, plain
+  // search results) was bringing back low-quality/irrelevant results.
+  // Restricted to kursi24.uz/uz ONLY until this is revisited. To restore
+  // full-web discovery, revert this block — git history has the prior
+  // multi-source query/instructions.
   const query =
     `${facetText} — ${city}, Uzbekistan. Find up to ${MAX_RESULTS_PER_SEARCH} distinct real ` +
-    `institutions. For each one report its name, the page you found it on, its official website, ` +
-    `its Instagram and Telegram pages, phone, and address. ` +
-    `Check kursi24.uz/uz (an Uzbekistan directory specifically listing learning/course centers, with ` +
-    `many real institutions), plus yellowpages.uz and goldenpages.uz (general Uzbekistan business ` +
-    `directories with structured listings — name, phone, address, category — for exactly this kind ` +
-    `of institution) in addition to official websites/social pages and general search results.`;
+    `institutions listed on kursi24.uz/uz ONLY. For each one report its name, the kursi24.uz/uz ` +
+    `page you found it on, its official website, its Instagram and Telegram pages, phone, and ` +
+    `address — but only fields kursi24.uz/uz's own listing actually shows; do not look them up ` +
+    `elsewhere.`;
 
   let results: DiscoverySearchResult[];
   try {
@@ -192,13 +196,13 @@ export async function searchInstitutions(
         " Most real " +
         "institutions are named and have websites/social pages in Uzbek or Russian, not English " +
         "— actively search in Uzbek and Russian as well as English, and do not skip an institution " +
-        "just because its name or site is not in English. kursi24.uz/uz is an Uzbekistan directory " +
-        "dedicated specifically to learning/course centers and lists a very large number of real " +
-        "institutions — check it for EVERY search, not just when other sources come up short. " +
-        "General Uzbekistan business directories like yellowpages.uz and goldenpages.uz also list " +
-        "many real institutions with structured contact details (phone, address) in one place — " +
-        "check all three specifically, not just general search results or official sites, since " +
-        "they often have the phone/address data an institution's own website or social page omits. " +
+        "just because its name or site is not in English. " +
+        "SOURCE RESTRICTION (temporary): search ONLY kursi24.uz/uz (an Uzbekistan directory " +
+        "dedicated specifically to learning/course centers). Do NOT use official institution " +
+        "websites, Instagram/Telegram/Facebook, yellowpages.uz, goldenpages.uz, maps, or general " +
+        "search results as a source for this task — every institution and every field must come " +
+        "from a kursi24.uz/uz listing page you actually saw. If kursi24.uz/uz has nothing relevant " +
+        "for this search, return an empty list rather than falling back to another source. " +
         `Return up to ${MAX_RESULTS_PER_SEARCH} distinct institutions per search — more real ` +
         "institutions per search is better, but never pad the list with duplicates or guesses. " +
         "HARD RULE: every one of website/instagram/telegram/facebook/phone/address must come from " +
