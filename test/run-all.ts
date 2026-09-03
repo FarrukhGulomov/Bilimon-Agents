@@ -1411,6 +1411,14 @@ console.log("20. Web frontend request validation (src/server.ts::parseRunRequest
 
   const nonStringCity = parseRunRequest(JSON.stringify({ city: 123, count: 1 }));
   assert("error" in nonStringCity, "a non-string city is rejected");
+
+  // "Top sifatli" mode checkbox.
+  const topOnlyRequested = parseRunRequest(JSON.stringify({ count: 5, topOnly: true }));
+  assert(!("error" in topOnlyRequested) && topOnlyRequested.topOnly === true, "topOnly:true is passed through");
+  const topOnlyDefault = parseRunRequest(JSON.stringify({ count: 5 }));
+  assert(!("error" in topOnlyDefault) && topOnlyDefault.topOnly === false, "topOnly defaults to false when omitted");
+  const topOnlyTruthyJunk = parseRunRequest(JSON.stringify({ count: 5, topOnly: "yes" }));
+  assert(!("error" in topOnlyTruthyJunk) && topOnlyTruthyJunk.topOnly === false, "a non-boolean-true topOnly value (e.g. a stray string) is treated as false, never truthy-coerced");
 }
 
 console.log("21. Retry-until-target discovery ceiling (src/agents/orchestrator.ts::maxTotalRaw)");

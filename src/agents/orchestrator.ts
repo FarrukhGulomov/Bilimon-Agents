@@ -119,6 +119,13 @@ export interface RunOptions {
    * CLI) can print a running progress line during a long batch. Optional —
    * defaults to a no-op so callers/tests that don't care can ignore it. */
   onProgress?: (snapshot: ProgressSnapshot) => void;
+  /** "Top sifatli o'quv markazlari" mode — real user request: rather than
+   * stopping once `count` institutions clear the quality gate, search a
+   * wider net (TOP_MODE_SEARCH_MULTIPLIER x `count`) and then keep only the
+   * `count` highest-`qualityScore` APPROVED institutions found (see
+   * RunSummary.topRecords). Default false — unchanged behavior for every
+   * existing caller. */
+  topOnly?: boolean;
 }
 
 /** One row of this run's results for a UI table (src/server.ts's
@@ -136,6 +143,12 @@ export interface RunResultRow {
   type: string | null;
   categories: string[];
   status: "approved" | "needsReview" | "rejected" | "pending";
+  /** 0-100 combined score (see services/scoring.ts::scoreInstitution), or
+   * null if this candidate never reached scoring (e.g. still pending, or a
+   * build error routed it to NEEDS_REVIEW before scoring ran). Drives "top
+   * sifatli" mode's ranking (RunOptions.topOnly) and is shown in the results
+   * table so the ranking is transparent, not just applied silently. */
+  qualityScore: number | null;
 }
 
 function buildResultRow(id: string, cand: DiscoveryCandidate): RunResultRow {
@@ -158,6 +171,7 @@ function buildResultRow(id: string, cand: DiscoveryCandidate): RunResultRow {
     type: record?.type ?? cand.type ?? null,
     categories: record?.details.categories ?? (cand.category ? [cand.category] : []),
     status,
+    qualityScore: state?.scores?.qualityScore ?? null,
   };
 }
 
@@ -191,6 +205,10 @@ export interface RunSummary {
    * data/processed/*.json on the server by hand. Exposed here so a caller
    * (src/server.ts) can offer them as a separate download. */
   needsReviewRecords: BilimOnExportRecord[];
+  /** Populated only when RunOptions.topOnly was set: the `count` highest-
+   * qualityScore APPROVED records found across the (wider-than-usual)
+   * search this run did. Empty array otherwise. */
+  topRecords: BilimOnExportRecord[];
 }
 
 type CandidateOutcome = "approved" | "needsReview" | "rejected" | "retry-pending";
@@ -269,6 +287,12 @@ const MAX_ROUNDS = 4;
 export function maxTotalRaw(count: number): number {
   return Math.min(Math.max(count * 4, count + 20), 200);
 }
+
+// "Top sifatli" mode (RunOptions.topOnly) searches this many times `count`
+// before ranking and keeping only the best `count` — a bigger pool to pick
+// the actual top institutions from, rather than just the first ones to
+// clear the ordinary quality gate.
+const TOP_MODE_SEARCH_MULTIPLIER = 3;
 
 export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
   ensureDirs();
@@ -488,15 +512,21 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
   const { maxConcurrency, progressReportEvery } = loadExecutionConfig();
   const onProgress = opts.onProgress ?? (() => {});
   const seenDiscoveryIds = new Set<string>();
-  const maxRaw = maxTotalRaw(opts.count);
+  // In topOnly mode the retry loop searches for `searchTarget` approved
+  // institutions (a wider net) even though only `opts.count` of them will
+  // actually be kept (the top-scoring ones) — see the ranking step after
+  // this loop. Every other caller (topOnly false/undefined) sees
+  // searchTarget === opts.count, i.e. no behavior change at all.
+  const searchTarget = opts.topOnly ? opts.count * TOP_MODE_SEARCH_MULTIPLIER : opts.count;
+  const maxRaw = maxTotalRaw(searchTarget);
   let totalRawFetched = 0;
   let completed = 0;
   let round = 0;
   let searchExhausted = false;
 
-  while (approved < opts.count && round < MAX_ROUNDS && totalRawFetched < maxRaw) {
+  while (approved < searchTarget && round < MAX_ROUNDS && totalRawFetched < maxRaw) {
     round++;
-    const remaining = opts.count - approved;
+    const remaining = searchTarget - approved;
     // Ask for more than the shortfall, since dedupe + the quality gate
     // shed a large share of raw candidates before they reach APPROVED
     // (see scoring.ts) — the buffer eases off after the first round so a
@@ -576,7 +606,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
         if (roundCompleted === survivors.length || completed % progressReportEvery === 0) {
           onProgress({
             completed,
-            total: Math.max(opts.count, completed),
+            total: Math.max(searchTarget, completed),
             approved,
             needsReview,
             rejected: rejectedCount,
@@ -607,6 +637,24 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
     );
   }
 
+  // "Top sifatli" ranking: out of every APPROVED institution this run found
+  // (up to searchTarget of them, a wider net than opts.count), keep only the
+  // opts.count highest-qualityScore ones. Real user request: search broadly
+  // across many sources, then surface only the top-quality learning
+  // centers, not just the first ones to clear the ordinary quality gate.
+  let topRecords: BilimOnExportRecord[] = [];
+  if (opts.topOnly) {
+    const ranked = [...results]
+      .filter((r) => r.status === "approved")
+      .sort((a, b) => (b.qualityScore ?? 0) - (a.qualityScore ?? 0))
+      .slice(0, opts.count);
+    for (const row of ranked) {
+      const rec = readProcessedRecord(row.id);
+      if (rec) topRecords.push(rec);
+    }
+    console.log(`Top sifatli: ${topRecords.length} ta tanlandi (${approved} ta tasdiqlangan orasidan).`);
+  }
+
   return {
     processedIds,
     duplicateIds,
@@ -618,6 +666,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
     shortfall,
     searchExhausted,
     needsReviewRecords,
+    topRecords,
   };
 }
 

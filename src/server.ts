@@ -72,7 +72,9 @@ async function readBody(req: IncomingMessage): Promise<string> {
   return Buffer.concat(chunks).toString("utf-8");
 }
 
-export function parseRunRequest(raw: string): { brief?: string; count: number } | { error: string } {
+export function parseRunRequest(
+  raw: string
+): { brief?: string; count: number; topOnly: boolean } | { error: string } {
   let parsed: unknown;
   try {
     parsed = raw ? JSON.parse(raw) : {};
@@ -112,7 +114,9 @@ export function parseRunRequest(raw: string): { brief?: string; count: number } 
   // what language the rest of the brief is in.
   const combinedBrief = [brief, city].filter(Boolean).join(" ") || undefined;
 
-  return { brief: combinedBrief, count };
+  const topOnly = body.topOnly === true;
+
+  return { brief: combinedBrief, count, topOnly };
 }
 
 async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
@@ -127,7 +131,7 @@ async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
     sendJson(res, 400, { error: parsedRequest.error });
     return;
   }
-  const { brief, count } = parsedRequest;
+  const { brief, count, topOnly } = parsedRequest;
 
   const mock = process.env.PIPELINE_MOCK === "1";
   if (!mock && !hasApiKey()) {
@@ -137,7 +141,7 @@ async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
 
   runInProgress = true;
   try {
-    const summary = await runPipeline({ count, mock, brief });
+    const summary = await runPipeline({ count, mock, brief, topOnly });
     const { report, importPath } = finalizeExport();
     sendJson(res, 200, {
       ok: true,
@@ -151,6 +155,7 @@ async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
         requested: count,
         shortfall: summary.shortfall,
         searchExhausted: summary.searchExhausted,
+        topOnly,
       },
       report,
       results: summary.results,
@@ -172,7 +177,13 @@ async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
       // records — there was no way to get the needsReview ones out of the
       // pipeline at all. Same envelope shape as importFile so a human
       // reviewing them can compare directly, just a separate file/button.
-      reviewFile: buildReviewFile(summary.needsReviewRecords),
+      reviewFile: buildRecordsFile(summary.needsReviewRecords),
+      // Real user request: rather than the first `count` institutions to
+      // clear the ordinary quality gate, search a wider net and surface
+      // only the `count` highest-qualityScore ones — "top sifatli o'quv
+      // markazlari". Populated only when topOnly was requested; same
+      // envelope shape as importFile/reviewFile.
+      topFile: topOnly ? buildRecordsFile(summary.topRecords) : undefined,
       downloadUrl: "/api/download",
     });
   } catch (err) {
@@ -202,7 +213,7 @@ function readImportFile(importPath: string): unknown {
   }
 }
 
-function buildReviewFile(records: BilimOnExportRecord[]): unknown {
+function buildRecordsFile(records: BilimOnExportRecord[]): unknown {
   return { version: 1, exportedAt: new Date().toISOString(), institutions: records };
 }
 
