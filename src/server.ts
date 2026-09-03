@@ -116,6 +116,7 @@ async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
         resolvedScope: summary.resolvedScope,
       },
       report,
+      results: summary.results,
       downloadUrl: "/api/download",
     });
   } catch (err) {

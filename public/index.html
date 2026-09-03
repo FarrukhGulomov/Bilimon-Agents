@@ -15,7 +15,7 @@
     justify-content: center;
     padding: 32px 16px;
   }
-  main { width: 100%; max-width: 560px; }
+  main { width: 100%; max-width: 860px; }
   h1 { font-size: 1.4rem; margin-bottom: 4px; }
   p.subtitle { color: #555; margin-top: 0; margin-bottom: 24px; }
   .card {
@@ -66,6 +66,26 @@
     vertical-align: -2px;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  #results-card { display: none; margin-top: 20px; }
+  .table-scroll { overflow-x: auto; margin-top: 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eceef1; white-space: nowrap; }
+  th { color: #555; font-weight: 600; }
+  td.name-cell { white-space: normal; max-width: 220px; }
+  td a { color: #2563eb; text-decoration: none; }
+  td a:hover { text-decoration: underline; }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+  .badge.approved { background: #dcfce7; color: #15803d; }
+  .badge.needsReview { background: #fef9c3; color: #a16207; }
+  .badge.rejected { background: #fee2e2; color: #b91c1c; }
+  .badge.pending { background: #e5e7eb; color: #4b5563; }
 </style>
 </head>
 <body>
@@ -85,6 +105,25 @@
     <div id="status"></div>
     <button id="download" type="button">JSON yuklab olish</button>
   </div>
+
+  <div class="card" id="results-card">
+    <strong id="results-title"></strong>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Nomi</th>
+            <th>Telefon</th>
+            <th>Sayt</th>
+            <th>Turi</th>
+            <th>Shahar</th>
+            <th>Holat</th>
+          </tr>
+        </thead>
+        <tbody id="results-body"></tbody>
+      </table>
+    </div>
+  </div>
 </main>
 
 <script>
@@ -92,6 +131,45 @@
   const submitBtn = document.getElementById("submit-btn");
   const statusEl = document.getElementById("status");
   const downloadBtn = document.getElementById("download");
+  const resultsCard = document.getElementById("results-card");
+  const resultsTitle = document.getElementById("results-title");
+  const resultsBody = document.getElementById("results-body");
+
+  const STATUS_LABELS = {
+    approved: "Tasdiqlandi",
+    needsReview: "Ko'rib chiqish kerak",
+    rejected: "Rad etildi",
+    pending: "Kutilmoqda",
+  };
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[c]));
+  }
+
+  function renderResults(rows) {
+    if (!rows || rows.length === 0) {
+      resultsCard.style.display = "none";
+      return;
+    }
+    resultsTitle.textContent = `Natijalar (${rows.length} ta):`;
+    resultsBody.innerHTML = rows.map((r) => {
+      const website = r.website
+        ? `<a href="${escapeHtml(r.website)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.website)}</a>`
+        : "—";
+      const status = STATUS_LABELS[r.status] || r.status;
+      return `<tr>
+        <td class="name-cell">${escapeHtml(r.name)}</td>
+        <td>${r.phone ? escapeHtml(r.phone) : "—"}</td>
+        <td>${website}</td>
+        <td>${r.type ? escapeHtml(r.type) : "—"}</td>
+        <td>${r.city ? escapeHtml(r.city) : "—"}</td>
+        <td><span class="badge ${escapeHtml(r.status)}">${escapeHtml(status)}</span></td>
+      </tr>`;
+    }).join("");
+    resultsCard.style.display = "block";
+  }
 
   downloadBtn.addEventListener("click", () => {
     window.location.href = "/api/download";
@@ -105,6 +183,7 @@
     statusEl.className = "";
     statusEl.textContent = "";
     downloadBtn.style.display = "none";
+    resultsCard.style.display = "none";
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<span class="spinner"></span>Qidirilmoqda... (bir necha daqiqa vaqt olishi mumkin)';
 
@@ -132,6 +211,8 @@
           `Tayyor: ${s.approved} tasdiqlandi, ${s.needsReview} ko'rib chiqish kerak, ` +
           `${s.rejected} rad etildi (jami ${s.processed} ta, ${s.duplicates} dublikat).`;
       }
+
+      renderResults(data.results);
 
       if (data.downloadUrl) {
         downloadBtn.style.display = "block";

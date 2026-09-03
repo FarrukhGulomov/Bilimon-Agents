@@ -13,7 +13,7 @@ import { runDiscovery, type DiscoveryCandidate } from "./discovery.js";
 import { deterministicDedupe, type DedupeCandidate } from "../services/deduplicator.js";
 import { researchMock, researchLive, mergeEvidence } from "./researcher.js";
 import { generateContent } from "./content-manager.js";
-import { buildExportRecord, exportFinalArtifacts, writeProcessedRecord } from "./bilimon-exporter.js";
+import { buildExportRecord, exportFinalArtifacts, writeProcessedRecord, readProcessedRecord } from "./bilimon-exporter.js";
 import { scoreInstitution } from "../services/scoring.js";
 import { validateRecord } from "../services/validator.js";
 import { generateDuplicateBookkeepingId, generateId, normalizeNameKey, slugify } from "../services/normalizer.js";
@@ -120,6 +120,46 @@ export interface RunOptions {
   onProgress?: (snapshot: ProgressSnapshot) => void;
 }
 
+/** One row of this run's results for a UI table (src/server.ts's
+ * /api/run response) — deliberately built from whatever is already on disk
+ * for `id` (data/processed/<id>.json when a record was built, otherwise the
+ * discovery-time candidate fields) rather than threaded through
+ * processCandidate()'s many return points, so this stays a read-only
+ * side-effect-free step after the run completes. */
+export interface RunResultRow {
+  id: string;
+  name: string;
+  phone: string | null;
+  website: string | null;
+  city: string | null;
+  type: string | null;
+  categories: string[];
+  status: "approved" | "needsReview" | "rejected" | "pending";
+}
+
+function buildResultRow(id: string, cand: DiscoveryCandidate): RunResultRow {
+  const state = readState(id);
+  const record = state?.state === "APPROVED" || state?.state === "NEEDS_REVIEW" ? readProcessedRecord(id) : null;
+  const status: RunResultRow["status"] =
+    state?.state === "APPROVED"
+      ? "approved"
+      : state?.state === "NEEDS_REVIEW"
+        ? "needsReview"
+        : state?.state === "REJECTED"
+          ? "rejected"
+          : "pending"; // retry-pending, or (shouldn't happen) never reached a terminal state
+  return {
+    id,
+    name: record?.nameUz ?? cand.rawName,
+    phone: record?.phone ?? cand.phone ?? null,
+    website: record?.website ?? cand.website ?? null,
+    city: cand.city ?? null,
+    type: record?.type ?? cand.type ?? null,
+    categories: record?.details.categories ?? (cand.category ? [cand.category] : []),
+    status,
+  };
+}
+
 export interface RunSummary {
   processedIds: string[];
   duplicateIds: string[];
@@ -127,6 +167,9 @@ export interface RunSummary {
   needsReview: number;
   rejected: number;
   resolvedScope: DiscoveryScope;
+  /** Per-institution rows for this run only (unlike report.json's
+   * cumulative-across-all-runs totals) — see RunResultRow. */
+  results: RunResultRow[];
 }
 
 type CandidateOutcome = "approved" | "needsReview" | "rejected" | "retry-pending";
@@ -444,6 +487,10 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
     },
   });
 
+  const results = survivors.map((cand) =>
+    buildResultRow(generateId(normalizeNameKey(cand.rawName), cand.city ?? ""), cand)
+  );
+
   return {
     processedIds,
     duplicateIds: [...mergedAwayIds],
@@ -451,6 +498,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
     needsReview,
     rejected: rejectedCount,
     resolvedScope: scope,
+    results,
   };
 }
 
