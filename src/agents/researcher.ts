@@ -7,10 +7,10 @@
  *
  *  1. PRIMARY, always: one web-search-grounded research call scoped to this
  *     single institution (llm-client.ts::researchInstitutionViaWebSearch).
- *     It is told to check the official site, Instagram/Telegram, and the
- *     yellowpages.uz / goldenpages.uz directories, and to return the full
- *     "sales" fact set including descriptionSourceText — the field Agent 3
- *     writes from.
+ *     It is told to check the official site, Instagram/Telegram, kursi24.uz/uz
+ *     (an Uzbekistan learning-center directory), and the yellowpages.uz /
+ *     goldenpages.uz directories, and to return the full "sales" fact set
+ *     including descriptionSourceText — the field Agent 3 writes from.
  *  2. SUPPLEMENTARY, best-effort: the plain HTML scrape (scraper.ts +
  *     extractor.ts) of the URLs we know about. A failed or empty fetch is a
  *     normal, silent outcome.
@@ -156,7 +156,7 @@ export function selectResearchEvidenceSource(
 export function classifySourceUrl(url: string): EvidenceItem["sourceType"] {
   const u = url.toLowerCase();
   if (/(instagram\.com|t\.me|telegram\.me|facebook\.com|fb\.com)/.test(u)) return "social";
-  if (/(yellowpages\.uz|goldenpages\.uz|maps\.|2gis\.|olx\.uz|orgpage|yandex\.[a-z]+\/maps)/.test(u)) return "directory";
+  if (/(kursi24\.uz|yellowpages\.uz|goldenpages\.uz|maps\.|2gis\.|olx\.uz|orgpage|yandex\.[a-z]+\/maps)/.test(u)) return "directory";
   if (/^https?:\/\//.test(u)) return "website";
   return "other";
 }

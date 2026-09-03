@@ -470,9 +470,10 @@ export async function researchInstitutionViaWebSearch(
   const instructions =
     "You are a deep-research agent preparing a marketplace listing for ONE named education " +
     "institution in Uzbekistan. Check, in this order: (1) the institution's official website, " +
-    "(2) its Instagram and Telegram pages, (3) Uzbekistan business directories yellowpages.uz and " +
-    "goldenpages.uz, which carry structured phone/address data that an institution's own site or " +
-    "social page often omits, (4) any other page that genuinely describes this institution. " +
+    "(2) its Instagram and Telegram pages, (3) kursi24.uz/uz (a directory dedicated to Uzbekistan " +
+    "learning/course centers) and general Uzbekistan business directories yellowpages.uz and " +
+    "goldenpages.uz, all of which carry structured phone/address data that an institution's own site " +
+    "or social page often omits, (4) any other page that genuinely describes this institution. " +
     "Most real institutions publish in Uzbek or Russian, not English — search in Uzbek and Russian " +
     "too, and do not skip a source because it is not in English.\n\n" +
     "Extract the facts that make this institution sellable to a student: contact details " +

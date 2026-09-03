@@ -175,9 +175,10 @@ export async function searchInstitutions(
     `${facetText} — ${city}, Uzbekistan. Find up to ${MAX_RESULTS_PER_SEARCH} distinct real ` +
     `institutions. For each one report its name, the page you found it on, its official website, ` +
     `its Instagram and Telegram pages, phone, and address. ` +
-    `Check yellowpages.uz and goldenpages.uz (Uzbekistan business directories with structured ` +
-    `listings — name, phone, address, category — for exactly this kind of institution) in ` +
-    `addition to official websites/social pages and general search results.`;
+    `Check kursi24.uz/uz (an Uzbekistan directory specifically listing learning/course centers, with ` +
+    `many real institutions), plus yellowpages.uz and goldenpages.uz (general Uzbekistan business ` +
+    `directories with structured listings — name, phone, address, category — for exactly this kind ` +
+    `of institution) in addition to official websites/social pages and general search results.`;
 
   let results: DiscoverySearchResult[];
   try {
@@ -191,11 +192,13 @@ export async function searchInstitutions(
         " Most real " +
         "institutions are named and have websites/social pages in Uzbek or Russian, not English " +
         "— actively search in Uzbek and Russian as well as English, and do not skip an institution " +
-        "just because its name or site is not in English. Uzbekistan business directories like " +
-        "yellowpages.uz and goldenpages.uz list many real institutions with structured contact " +
-        "details (phone, address) in one place — check them specifically, not just general search " +
-        "results or official sites, since they often have the phone/address data an institution's " +
-        "own website or social page omits. " +
+        "just because its name or site is not in English. kursi24.uz/uz is an Uzbekistan directory " +
+        "dedicated specifically to learning/course centers and lists a very large number of real " +
+        "institutions — check it for EVERY search, not just when other sources come up short. " +
+        "General Uzbekistan business directories like yellowpages.uz and goldenpages.uz also list " +
+        "many real institutions with structured contact details (phone, address) in one place — " +
+        "check all three specifically, not just general search results or official sites, since " +
+        "they often have the phone/address data an institution's own website or social page omits. " +
         `Return up to ${MAX_RESULTS_PER_SEARCH} distinct institutions per search — more real ` +
         "institutions per search is better, but never pad the list with duplicates or guesses. " +
         "HARD RULE: every one of website/instagram/telegram/facebook/phone/address must come from " +
