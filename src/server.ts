@@ -12,6 +12,24 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { runPipeline, finalizeExport } from "./agents/orchestrator.js";
 import { MissingApiKeyError, hasApiKey, isFatalProviderError } from "./services/llm-client.js";
+import { listCities } from "./services/location-mapper.js";
+
+// Uzbek display labels for the frontend's city dropdown, keyed by the real
+// CitySeed.nameEn (src/schemas/locations.ts) so the dropdown's option value
+// is exactly the string services/brief-parser.ts::matchCityNames already
+// knows how to match — no separate mapping to keep in sync on the backend
+// side. Display-only; never used for matching or resolution.
+const CITY_LABELS_UZ: Record<string, string> = {
+  Tashkent: "Toshkent",
+  Samarkand: "Samarqand",
+  Bukhara: "Buxoro",
+  Namangan: "Namangan",
+  Fergana: "Farg'ona",
+  Andijan: "Andijon",
+  Karshi: "Qarshi",
+  Jizzakh: "Jizzax",
+  "Tashkent Region": "Toshkent viloyati (shahar aniqlanmagan)",
+};
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "..", "public");
@@ -69,6 +87,13 @@ export function parseRunRequest(raw: string): { brief?: string; count: number } 
     if (!brief) brief = undefined;
   }
 
+  let city: string | undefined;
+  if (body.city !== undefined && body.city !== null) {
+    if (typeof body.city !== "string") return { error: "\"city\" matn bo'lishi kerak." };
+    city = body.city.trim().slice(0, MAX_BRIEF_LENGTH);
+    if (!city) city = undefined;
+  }
+
   const rawCount = body.count ?? 5;
   const count = Number(rawCount);
   if (!Number.isFinite(count) || !Number.isInteger(count) || count < 1) {
@@ -78,7 +103,15 @@ export function parseRunRequest(raw: string): { brief?: string; count: number } 
     return { error: `"count" ${MAX_COUNT} dan oshmasligi kerak.` };
   }
 
-  return { brief, count };
+  // The city dropdown's value is a real CitySeed.nameEn (or omitted for "all
+  // cities") — folded straight into the free-text brief rather than plumbed
+  // through as a separate RunOptions field, since resolveBrief() already
+  // runs matchCityNames() unconditionally over whatever brief text it gets
+  // (see brief-parser.ts) and matches on nameEn/its aliases regardless of
+  // what language the rest of the brief is in.
+  const combinedBrief = [brief, city].filter(Boolean).join(" ") || undefined;
+
+  return { brief: combinedBrief, count };
 }
 
 async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
@@ -161,6 +194,14 @@ function readImportFile(importPath: string): unknown {
   }
 }
 
+function handleApiCities(res: ServerResponse) {
+  const cities = listCities().map((c) => ({
+    nameEn: c.nameEn,
+    label: CITY_LABELS_UZ[c.nameEn] ?? c.nameEn,
+  }));
+  sendJson(res, 200, { cities });
+}
+
 function handleApiDownload(res: ServerResponse) {
   if (!existsSync(IMPORT_FILE)) {
     sendJson(res, 404, { error: "Hali natija yo'q. Avval so'rov yuboring." });
@@ -194,6 +235,8 @@ const server = createServer((req, res) => {
       handleIndex(res);
     } else if (req.method === "GET" && url.pathname === "/health") {
       sendJson(res, 200, { ok: true });
+    } else if (req.method === "GET" && url.pathname === "/api/cities") {
+      handleApiCities(res);
     } else if (req.method === "POST" && url.pathname === "/api/run") {
       await handleApiRun(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/download") {
