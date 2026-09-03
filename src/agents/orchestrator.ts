@@ -22,6 +22,7 @@ import { loadExecutionConfig } from "../services/execution-config.js";
 import { resolveBrief, type DiscoveryScope } from "../services/brief-parser.js";
 import { persistLastScope } from "../services/scope-store.js";
 import { isFatalProviderError } from "../services/llm-client.js";
+import { detectNonEducationalOrg } from "../services/relevance-filter.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATE_DIR = join(__dirname, "..", "..", "data", "state");
@@ -292,6 +293,30 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
     }
 
     try {
+      // Cheap early exit, BEFORE spending Agent 2's research call or Agent
+      // 3's content-generation call: if Agent 1's own discovery data
+      // (name/snippet) already contains a strong non-educational-org
+      // signal, there's no reason to research or write content for it —
+      // just flag it and move on to the next candidate. Real user concern:
+      // a candidate that plainly isn't a learning center was still going
+      // through full research + content generation (real API spend) before
+      // detectNonEducationalOrg() ever ran (previously only checked in
+      // buildExportRecord, at the very end of the pipeline). The same check
+      // still runs again there as a safety net for cases the discovery-time
+      // name/snippet alone doesn't reveal (only surfaces once research pulls
+      // in more text) — this is a token-saving fast path, not a replacement.
+      const earlyFlag = detectNonEducationalOrg({
+        nameLatin: cand.rawName,
+        achievements: cand.notes ?? undefined,
+      });
+      if (earlyFlag) {
+        const reason = `flagged from discovery data before research (saved a research+content call): ${earlyFlag}`;
+        writeFileSync(join(REVIEW_DIR, `${id}.json`), JSON.stringify({ id, reasons: [reason] }, null, 2), "utf-8");
+        console.log(`NEEDS_REVIEW: ${nameKey} (${id}) — ${reason}`);
+        transition(state, "NEEDS_REVIEW", reason);
+        return "needsReview";
+      }
+
       // --- RESEARCHING ---
       if (!isPastStage(state.state, "RESEARCHING")) {
         transition(state, "RESEARCHING");
