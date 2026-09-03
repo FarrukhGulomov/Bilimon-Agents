@@ -62,9 +62,10 @@ export const DetailsZ = z.object({
 });
 
 export const BilimOnExportRecordZ = z.object({
-  // See src/types/index.ts BilimOnExportRecord.id doc comment — nullable
-  // pending confirmation of BilimOn's real import id convention.
-  id: z.string().min(1).nullable(),
+  // See src/types/index.ts BilimOnExportRecord.id doc comment — BilimOn's
+  // real import endpoint rejects a null id, so this is a required non-null
+  // string (a cuid-shaped id this pipeline generates itself).
+  id: z.string().min(1),
   nameUz: z.string().min(1),
   nameRu: z.string().min(1),
   nameKey: z.string().min(1),

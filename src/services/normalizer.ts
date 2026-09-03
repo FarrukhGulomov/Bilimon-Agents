@@ -3,7 +3,7 @@
  * No LLM calls here — kept as plain code for cost/determinism (see README
  * "Cost optimization notes").
  */
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 const DIACRITIC_MAP: Record<string, string> = {
   ʻ: "'",
@@ -100,6 +100,37 @@ export function generateDuplicateBookkeepingId(discoveryId: string): string {
 /** Deterministic short hash, used for cache filenames and disambiguation suffixes. */
 export function sha256(input: string): string {
   return createHash("sha256").update(input).digest("hex");
+}
+
+const BASE36 = "0123456789abcdefghijklmnopqrstuvwxyz";
+
+/**
+ * Generates a cuid-shaped id ("c" + 24 lowercase alphanumeric chars, 25
+ * chars total) for `BilimOnExportRecord.id` — matching the exact shape of
+ * every id in data/reference/bilimon-institutions-reference.json (e.g.
+ * "cmrfw8t5o001an3ogocewc8g6").
+ *
+ * Real production bug: this pipeline used to leave `id: null` on every
+ * exported record, on the assumed (and at the time explicitly
+ * user-confirmed) premise that BilimOn's own backend assigns the real cuid
+ * on import. That assumption was disproven by BilimOn's actual production
+ * import endpoint (`POST /api/v1/super-admin/import/institutions`), which
+ * rejects a null `id` outright: `{"code":"invalid_type","expected":"string",
+ * "received":"null","path":["institutions",0,"id"]}`. The endpoint expects
+ * the CLIENT to supply an id string — not necessarily cuid-shaped, since the
+ * error only asserted "string", but matching the real export's own shape is
+ * the safest choice against any further server-side format validation this
+ * one 400 didn't reveal. Never an actual `cuid()` algorithm (no dependency
+ * for that, and the server doesn't need us to guess its internal ID scheme
+ * exactly) — just visually/structurally identical and, via crypto-random
+ * bytes, ~as collision-resistant as this pipeline needs for a client-issued
+ * id.
+ */
+export function generateBilimonRecordId(): string {
+  const bytes = randomBytes(24);
+  let out = "";
+  for (const b of bytes) out += BASE36[b % 36];
+  return `c${out}`;
 }
 
 export interface PhoneNormalizeResult {

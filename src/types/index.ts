@@ -178,19 +178,22 @@ export type BranchRecord = unknown;
 /** The REAL BilimOn export record shape (see README.md "Schema status: REAL"). */
 export interface BilimOnExportRecord {
   /**
-   * CONFIRMED design decision (2026-08-31): BilimOn's own backend assigns
-   * the real cuid `id` when a record is imported — this pipeline never
-   * generates or guesses one. The 302 real reference records all carry
-   * cuid-style ids (e.g. "cmrfw8t5o001an3ogocewc8g6") that look
-   * auto-assigned on insert, and the user confirmed this is in fact how
-   * BilimOn's real import mechanism works, not just a plausible guess from
-   * the data shape alone. Every record this pipeline exports therefore
-   * leaves `id: null` and relies on BilimOn's own import to assign the real
-   * id — see agents/bilimon-exporter.ts::buildExportRecord.
+   * REVISED (superseding the earlier 2026-08-31 "BilimOn assigns id on
+   * import" decision): that assumption was disproven by BilimOn's actual
+   * production import endpoint (POST /api/v1/super-admin/import/
+   * institutions), which rejected a real exported batch with `id: null`
+   * outright — a 400 with `{"code":"invalid_type","expected":"string",
+   * "received":"null","path":["institutions",0,"id"]}`. The endpoint
+   * requires the client to supply an id string. Every record this pipeline
+   * exports now carries a cuid-shaped id generated client-side (matching
+   * the shape of every id in the real reference export, e.g.
+   * "cmrfw8t5o001an3ogocewc8g6") — see
+   * services/normalizer.ts::generateBilimonRecordId and
+   * agents/bilimon-exporter.ts::buildExportRecord.
    * Pipeline-internal state tracking uses a separate, clearly-prefixed id
    * (see StateRecord.id / services/normalizer.ts::generateId) — never this field.
    */
-  id: string | null;
+  id: string;
   nameUz: string;
   nameRu: string;
   nameKey: string;
