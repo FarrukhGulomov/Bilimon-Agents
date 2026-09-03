@@ -149,9 +149,22 @@ export interface RunResultRow {
    * sifatli" mode's ranking (RunOptions.topOnly) and is shown in the results
    * table so the ranking is transparent, not just applied silently. */
   qualityScore: number | null;
+  /** Which discovery source actually found this institution — real user
+   * request: the kursi24.uz scraper (services/kursi24.ts) runs silently
+   * alongside the LLM-search facets inside discoverLive(), and there was no
+   * way to see which source a given result came from. Human-readable label
+   * derived from DiscoveryCandidate.sourceType. */
+  source: string;
 }
 
-function buildResultRow(id: string, cand: DiscoveryCandidate): RunResultRow {
+const DISCOVERY_SOURCE_LABELS: Record<DiscoveryCandidate["sourceType"], string> = {
+  kursi24_scrape: "kursi24.uz",
+  web_search: "LLM qidiruv",
+  fixture: "mock",
+  manual: "qo'lda",
+};
+
+export function buildResultRow(id: string, cand: DiscoveryCandidate): RunResultRow {
   const state = readState(id);
   const record = state?.state === "APPROVED" || state?.state === "NEEDS_REVIEW" ? readProcessedRecord(id) : null;
   const status: RunResultRow["status"] =
@@ -172,6 +185,7 @@ function buildResultRow(id: string, cand: DiscoveryCandidate): RunResultRow {
     categories: record?.details.categories ?? (cand.category ? [cand.category] : []),
     status,
     qualityScore: state?.scores?.qualityScore ?? null,
+    source: DISCOVERY_SOURCE_LABELS[cand.sourceType] ?? cand.sourceType,
   };
 }
 

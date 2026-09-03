@@ -185,7 +185,11 @@ with zero network calls.
    reusing `brief-parser.ts`'s own keyword tables) — filtering on that would
    silently discard most of kursi24's real data under the default scope,
    defeating the point of this source. Only the shortfall below `count` is
-   filled by the LLM-search facet loop.
+   filled by the LLM-search facet loop. **Visible in the web frontend**: the
+   results table's "Manba" (source) column shows "kursi24.uz" vs. "LLM
+   qidiruv" per row (`RunResultRow.source`, src/agents/orchestrator.ts), and
+   the table header breaks down counts per source — this used to run
+   silently with no way to see which source found a given result.
 2. **Deep Research (`agents/researcher.ts`).** Two sources per institution:
    a **primary** web-search-grounded research call scoped to that one named
    institution (official site → Instagram/Telegram → kursi24.uz/uz →
