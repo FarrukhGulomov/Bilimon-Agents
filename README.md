@@ -190,6 +190,13 @@ with zero network calls.
    qidiruv" per row (`RunResultRow.source`, src/agents/orchestrator.ts), and
    the table header breaks down counts per source — this used to run
    silently with no way to see which source found a given result.
+   **Explicitly selectable, not just visible after the fact**: a "Faqat
+   kursi24.uz orqali qidirish" checkbox (`RunOptions.kursi24Only`) makes the
+   LLM-search facet loop never run at all, even if the crawl comes up short
+   of `count` — real user request for an actual way to choose this source,
+   not just observe it. Also available on the CLI as `pipeline run
+   --kursi24-only`. No effect in `--mock` mode (the fixtures have no
+   kursi24 concept).
 2. **Deep Research (`agents/researcher.ts`).** Two sources per institution:
    a **primary** web-search-grounded research call scoped to that one named
    institution (official site → Instagram/Telegram → kursi24.uz/uz →

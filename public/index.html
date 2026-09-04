@@ -139,6 +139,11 @@
         Faqat TOP sifatli markazlarni toping (ko'proq manbadan qidirib, eng yuqori bahoga ega tanlaydi)
       </label>
 
+      <label class="checkbox-row" for="kursi24-only">
+        <input type="checkbox" id="kursi24-only" name="kursi24-only" />
+        Faqat kursi24.uz orqali qidirish (LLM qidiruvsiz, bepul va tezroq, lekin kamroq natija berishi mumkin)
+      </label>
+
       <button type="submit" id="submit-btn">Qidirishni boshlash</button>
     </form>
   </div>
@@ -347,6 +352,9 @@
             const topCount = data.topFile?.institutions?.length || 0;
             statusEl.textContent += `\nTOP sifatli: ${topCount} ta eng yuqori bahoga ega institut tanlandi.`;
           }
+          if (s.kursi24Only) {
+            statusEl.textContent += `\nFaqat kursi24.uz orqali qidirildi (LLM qidiruvsiz).`;
+          }
         }
       }
 
@@ -381,8 +389,9 @@
     const city = citySelect.value;
     const count = Number(document.getElementById("count").value);
     const topOnly = document.getElementById("top-only").checked;
+    const kursi24Only = document.getElementById("kursi24-only").checked;
     await submitRun(
-      { brief: brief || undefined, city: city || undefined, count, topOnly },
+      { brief: brief || undefined, city: city || undefined, count, topOnly, kursi24Only },
       submitBtn,
       "Qidirilmoqda... (bir necha daqiqa vaqt olishi mumkin)",
       "Qidirishni boshlash"
