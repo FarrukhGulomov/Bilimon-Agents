@@ -19,7 +19,7 @@ import { validateRecord } from "../services/validator.js";
 import { generateDuplicateBookkeepingId, generateId, normalizeNameKey, slugify, sha256 } from "../services/normalizer.js";
 import { runWithConcurrency } from "../services/concurrency.js";
 import { loadExecutionConfig } from "../services/execution-config.js";
-import { resolveBrief, type DiscoveryScope } from "../services/brief-parser.js";
+import { resolveBrief, inferTypeAndCategoriesFromText, type DiscoveryScope } from "../services/brief-parser.js";
 import { persistLastScope } from "../services/scope-store.js";
 import { isFatalProviderError } from "../services/llm-client.js";
 import { detectNonEducationalOrg } from "../services/relevance-filter.js";
@@ -442,6 +442,29 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
       if (!fields.lng && cand.lng) fields.lng = cand.lng;
       if (!fields.descriptionSourceText && cand.descriptionSourceText) {
         fields.descriptionSourceText = cand.descriptionSourceText;
+      }
+
+      // Real production bug: "look up by name" mode has no discovery step,
+      // so `cand.type`/`cand.category` are never set and the two fallbacks
+      // above never fire — `fields.type`/`fields.categories` stayed empty
+      // all the way into content generation, and content-manager.ts::
+      // assessContentMaterial requires a type/category to consider there
+      // enough material to write a description. A real run for "Registon
+      // o'quv markazi" came back with real phone/website/telegram/programs/
+      // achievements but both descriptions null because of this. Infer from
+      // the institution's own verified text (no new facts, no LLM call)
+      // whenever discovery didn't already supply a type/category.
+      if (!fields.type || !fields.categories || fields.categories.length === 0) {
+        const evidenceText = [
+          fields.nameUz, fields.nameRu, fields.nameLatin, fields.achievements,
+          fields.descriptionSourceText,
+          ...(fields.programs ?? []), ...(fields.specializations ?? []),
+        ].filter((v): v is string => typeof v === "string" && v.length > 0).join(" ");
+        const inferred = inferTypeAndCategoriesFromText(evidenceText);
+        if (!fields.type && inferred.type) fields.type = inferred.type;
+        if ((!fields.categories || fields.categories.length === 0) && inferred.categories.length > 0) {
+          fields.categories = inferred.categories;
+        }
       }
 
       // Real production bug: `nameKey`/`slug` above are computed from

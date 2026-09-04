@@ -55,7 +55,7 @@ import {
   handleProviderError,
   isFatalProviderError,
 } from "../src/services/llm-client.js";
-import { resolveBriefHeuristic, loadDefaultScope, resolveBrief } from "../src/services/brief-parser.js";
+import { resolveBriefHeuristic, loadDefaultScope, resolveBrief, inferTypeAndCategoriesFromText } from "../src/services/brief-parser.js";
 import { discoverMock, mapSearchResultToCandidate, mapKursi24ListingToCandidate } from "../src/agents/discovery.js";
 import { parseKursi24DetailPage, inferCategoriesFromLabels, inferTypesFromLabels } from "../src/services/kursi24.js";
 import { buildScopeInstruction } from "../src/services/search.js";
@@ -1627,6 +1627,42 @@ console.log("26. \"Look up by name\" mode no longer fabricates a listing for a n
   } finally {
     for (const p of cleanupPaths) if (existsSync(p)) unlinkSync(p);
   }
+}
+
+console.log("27. \"Look up by name\" mode no longer leaves descriptions null just because discovery never ran (src/services/brief-parser.ts::inferTypeAndCategoriesFromText, src/agents/orchestrator.ts)");
+{
+  // Real production bug: a real run for "Registon o'quv markazi" came back
+  // with real phone/website/telegram/programs/achievements, but both
+  // descriptionUz/descriptionRu were null — because "look up by name" mode
+  // has no discovery step, fields.type/fields.categories were never set,
+  // and content-manager.ts::assessContentMaterial requires a type/category
+  // before it considers there enough material to write a description.
+  const registonLikeText = "General English IELTS kurslari Ingliz tili o'qitish IELTS imtihoniga tayyorlash";
+  const inferred = inferTypeAndCategoriesFromText(registonLikeText);
+  assert(inferred.type === "COURSE_CENTER", `a course-center-shaped program list infers type COURSE_CENTER (got ${inferred.type})`);
+  assert(inferred.categories.includes("IELTS"), `IELTS-shaped evidence infers the IELTS category (got ${JSON.stringify(inferred.categories)})`);
+  assert(inferred.categories.includes("LANGUAGES"), `"Ingliz tili" evidence infers the LANGUAGES category (got ${JSON.stringify(inferred.categories)})`);
+
+  const empty = inferTypeAndCategoriesFromText("");
+  assert(empty.type === null && empty.categories.length === 0, "empty/unmatched text infers nothing rather than guessing");
+
+  // End-to-end: with a type/category now inferable from real evidence,
+  // assessContentMaterial's gate passes on the same facts a real "look up
+  // by name" run actually found for "Registon o'quv markazi".
+  const registonFields = {
+    nameUz: "Registon o'quv markazi",
+    nameRu: "Регистон учебный центр",
+    address: "Shota Rustaveli ko'chasi 53",
+    foundedYear: 2014,
+    studentCount: 1300,
+    programs: ["General English", "IELTS kurslari"],
+    specializations: ["Ingliz tili o'qitish", "IELTS imtihoniga tayyorlash"],
+    achievements: "700 dan ziyod o'quvchi IELTS 7.0-7.5 natijalarni qo'lga kiritishdi.",
+    type: inferred.type ?? undefined,
+    categories: inferred.categories,
+  } as any;
+  const material = assessContentMaterial(registonFields);
+  assert(material.sufficient === true, `real Registon-shaped evidence, once type/categories are inferred, is enough material to write content (reason: ${material.reason})`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
