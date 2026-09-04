@@ -24,6 +24,8 @@
     padding: 24px;
     box-shadow: 0 1px 4px rgba(0,0,0,0.08);
   }
+  .card + .card { margin-top: 16px; }
+  h3 { font-size: 1rem; }
   label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 6px; }
   input[type="text"], input[type="number"], select {
     width: 100%;
@@ -139,6 +141,18 @@
 
       <button type="submit" id="submit-btn">Qidirishni boshlash</button>
     </form>
+  </div>
+
+  <div class="card" id="lookup-card">
+    <h3 style="margin-top:0">Muayyan bitta o'quv markazni qidirish</h3>
+    <form id="lookup-form">
+      <label for="institution-name">O'quv markazi nomi</label>
+      <input type="text" id="institution-name" name="institution-name" placeholder="masalan: Najot Ta'lim" maxlength="300" />
+      <button type="submit" id="lookup-btn">Shu markazni qidirish</button>
+    </form>
+  </div>
+
+  <div class="card">
     <div id="status"></div>
     <button id="download" type="button">Tasdiqlangan JSON yuklab olish</button>
     <button id="download-review" type="button">Ko'rib chiqish kerak bo'lganlarni JSON yuklab olish</button>
@@ -170,6 +184,8 @@
 <script>
   const form = document.getElementById("run-form");
   const submitBtn = document.getElementById("submit-btn");
+  const lookupForm = document.getElementById("lookup-form");
+  const lookupBtn = document.getElementById("lookup-btn");
   const statusEl = document.getElementById("status");
   const downloadBtn = document.getElementById("download");
   const downloadReviewBtn = document.getElementById("download-review");
@@ -276,27 +292,25 @@
     if (lastTopFile) downloadJson(lastTopFile, "bilimon-top-institutions.json");
   });
 
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const brief = document.getElementById("brief").value.trim();
-    const city = citySelect.value;
-    const count = Number(document.getElementById("count").value);
-    const topOnly = document.getElementById("top-only").checked;
-
+  // Shared by both forms below: the broad-discovery form (brief/city/count/
+  // topOnly) and the "look up by name" form (institutionName) hit the same
+  // /api/run endpoint and render into the same status/results/download UI —
+  // only the request body and the busy-button differ.
+  async function submitRun(body, busyButton, busyLabel, idleLabel) {
     statusEl.className = "";
     statusEl.textContent = "";
     downloadBtn.style.display = "none";
     downloadReviewBtn.style.display = "none";
     downloadTopBtn.style.display = "none";
     resultsCard.style.display = "none";
-    submitBtn.disabled = true;
-    submitBtn.innerHTML = '<span class="spinner"></span>Qidirilmoqda... (bir necha daqiqa vaqt olishi mumkin)';
+    busyButton.disabled = true;
+    busyButton.innerHTML = `<span class="spinner"></span>${busyLabel}`;
 
     try {
       const res = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brief: brief || undefined, city: city || undefined, count, topOnly }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
 
@@ -313,19 +327,26 @@
         const s = data.summary;
         const shortfall = s.shortfall || 0;
         statusEl.className = shortfall > 0 ? "error" : "success";
-        statusEl.textContent =
-          `Tayyor: ${s.approved} tasdiqlandi, ${s.needsReview} ko'rib chiqish kerak, ` +
-          `${s.rejected} rad etildi (jami ${s.processed} ta, ${s.duplicates} dublikat).`;
-        if (shortfall > 0) {
-          statusEl.textContent +=
-            `\n${s.requested} ta so'ralgan edi, ${shortfall} ta yetishmaydi — ` +
-            (s.searchExhausted
-              ? "tanlangan soha/shahar bo'yicha boshqa yangi o'quv markazi topilmadi."
-              : "qidiruv urinishlar chegarasiga yetdi, keyinroq qayta urinib ko'ring.");
-        }
-        if (s.topOnly) {
-          const topCount = data.topFile?.institutions?.length || 0;
-          statusEl.textContent += `\nTOP sifatli: ${topCount} ta eng yuqori bahoga ega institut tanlandi.`;
+        if (s.institutionName) {
+          statusEl.textContent =
+            shortfall > 0
+              ? `"${s.institutionName}" nomli institut haqida yetarli ma'lumot tasdiqlanmadi.`
+              : `"${s.institutionName}" nomli institut haqida ma'lumot topildi va tasdiqlandi.`;
+        } else {
+          statusEl.textContent =
+            `Tayyor: ${s.approved} tasdiqlandi, ${s.needsReview} ko'rib chiqish kerak, ` +
+            `${s.rejected} rad etildi (jami ${s.processed} ta, ${s.duplicates} dublikat).`;
+          if (shortfall > 0) {
+            statusEl.textContent +=
+              `\n${s.requested} ta so'ralgan edi, ${shortfall} ta yetishmaydi — ` +
+              (s.searchExhausted
+                ? "tanlangan soha/shahar bo'yicha boshqa yangi o'quv markazi topilmadi."
+                : "qidiruv urinishlar chegarasiga yetdi, keyinroq qayta urinib ko'ring.");
+          }
+          if (s.topOnly) {
+            const topCount = data.topFile?.institutions?.length || 0;
+            statusEl.textContent += `\nTOP sifatli: ${topCount} ta eng yuqori bahoga ega institut tanlandi.`;
+          }
         }
       }
 
@@ -349,9 +370,35 @@
       statusEl.className = "error";
       statusEl.textContent = "Server bilan bog'lanib bo'lmadi: " + err.message;
     } finally {
-      submitBtn.disabled = false;
-      submitBtn.textContent = "Qidirishni boshlash";
+      busyButton.disabled = false;
+      busyButton.textContent = idleLabel;
     }
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const brief = document.getElementById("brief").value.trim();
+    const city = citySelect.value;
+    const count = Number(document.getElementById("count").value);
+    const topOnly = document.getElementById("top-only").checked;
+    await submitRun(
+      { brief: brief || undefined, city: city || undefined, count, topOnly },
+      submitBtn,
+      "Qidirilmoqda... (bir necha daqiqa vaqt olishi mumkin)",
+      "Qidirishni boshlash"
+    );
+  });
+
+  lookupForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const institutionName = document.getElementById("institution-name").value.trim();
+    if (!institutionName) return;
+    await submitRun(
+      { institutionName },
+      lookupBtn,
+      "Qidirilmoqda...",
+      "Shu markazni qidirish"
+    );
   });
 </script>
 </body>

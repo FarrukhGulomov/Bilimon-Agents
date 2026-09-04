@@ -74,7 +74,7 @@ async function readBody(req: IncomingMessage): Promise<string> {
 
 export function parseRunRequest(
   raw: string
-): { brief?: string; count: number; topOnly: boolean } | { error: string } {
+): { brief?: string; count: number; topOnly: boolean; institutionName?: string } | { error: string } {
   let parsed: unknown;
   try {
     parsed = raw ? JSON.parse(raw) : {};
@@ -116,7 +116,19 @@ export function parseRunRequest(
 
   const topOnly = body.topOnly === true;
 
-  return { brief: combinedBrief, count, topOnly };
+  // "Look up by name" mode: real user request — type one specific
+  // institution's name and have it researched directly. Passed straight
+  // through to RunOptions.institutionName; see its doc comment in
+  // orchestrator.ts for why this bypasses brief/city/count/topOnly entirely
+  // once set.
+  let institutionName: string | undefined;
+  if (body.institutionName !== undefined && body.institutionName !== null) {
+    if (typeof body.institutionName !== "string") return { error: "\"institutionName\" matn bo'lishi kerak." };
+    institutionName = body.institutionName.trim().slice(0, MAX_BRIEF_LENGTH);
+    if (!institutionName) institutionName = undefined;
+  }
+
+  return { brief: combinedBrief, count, topOnly, institutionName };
 }
 
 async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
@@ -131,7 +143,7 @@ async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
     sendJson(res, 400, { error: parsedRequest.error });
     return;
   }
-  const { brief, count, topOnly } = parsedRequest;
+  const { brief, count, topOnly, institutionName } = parsedRequest;
 
   const mock = process.env.PIPELINE_MOCK === "1";
   if (!mock && !hasApiKey()) {
@@ -141,7 +153,7 @@ async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
 
   runInProgress = true;
   try {
-    const summary = await runPipeline({ count, mock, brief, topOnly });
+    const summary = await runPipeline({ count, mock, brief, topOnly, institutionName });
     const { report, importPath } = finalizeExport();
     sendJson(res, 200, {
       ok: true,
@@ -156,6 +168,7 @@ async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
         shortfall: summary.shortfall,
         searchExhausted: summary.searchExhausted,
         topOnly,
+        institutionName: institutionName ?? null,
       },
       report,
       results: summary.results,

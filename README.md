@@ -471,6 +471,19 @@ npm run server
   applied silently, and a third button, "TOP sifatli JSON yuklab olish (N
   ta)", downloads just that curated subset (same envelope shape again).
   Also available on the CLI as `pipeline run --top`.
+- **"Muayyan bitta o'quv markazni qidirish" (look up by name)** — real user
+  request: a separate small form where typing one specific institution's
+  name researches exactly that institution, skipping the broad discovery
+  machinery (LLM-search facets, kursi24 crawl) entirely — the name is
+  already known, so there's nothing to discover. `RunOptions.institutionName`
+  (`src/agents/orchestrator.ts`) short-circuits `runPipeline()` before
+  discovery/dedupe/the retry-until-target loop: it builds one
+  `sourceType: "manual"` candidate and runs it through the exact same
+  research → content → export → quality-gate pipeline as every other
+  candidate, then returns. `count`/`topOnly`/the city dropdown are ignored
+  in this mode. Renders into the same results table/download buttons as the
+  broad-discovery form. Also available on the CLI as
+  `pipeline run --name "<institution name>"`.
 - Same mock-vs-real gate as the CLI: `PIPELINE_MOCK=1` runs off fixtures
   with no key needed; otherwise a missing API key returns a clear error
   instead of a crash.
