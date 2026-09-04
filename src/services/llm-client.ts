@@ -480,6 +480,10 @@ export async function researchInstitutionViaWebSearch(
   const query =
     `Institution: "${input.name}"${input.city ? `, ${input.city}, Uzbekistan` : ", Uzbekistan"}.\n` +
     (links.length > 0 ? `Known links to start from:\n${links.map((l) => `- ${l}`).join("\n")}\n` : "") +
+    `Also try business-oriented search variants of the name, e.g. "${input.name} o'quv markazi", ` +
+    `"${input.name} LC", "${input.name} ta'lim markazi", "${input.name} learning center" — Uzbek ` +
+    `education businesses very commonly share a bare name with an unrelated place, historical site, or ` +
+    `common word, and only a name-plus-business-word search surfaces them.\n` +
     `Research this ONE institution and report only what you actually find.`;
 
   const instructions =
@@ -488,11 +492,24 @@ export async function researchInstitutionViaWebSearch(
     "currently-operating education/learning institution (a language center, tutoring service, " +
     "course center, or exam-prep center) — not a historical monument, museum, mosque, government " +
     "office, company, product, public figure, or anything else that merely shares or resembles the " +
-    "name. Set `isEducationInstitution` to true only once a source has actually confirmed this; set " +
-    "it to false if the sources clearly show it is something else; set it to null if you genuinely " +
-    "cannot tell. If it is not confirmed true, leave every field in `fields` null/empty and " +
-    "`sourceUrls` empty — do NOT describe the other entity instead, even if it is well-documented " +
-    "and would otherwise make for a rich-looking listing.\n\n" +
+    "name.\n\n" +
+    "IMPORTANT — name collisions are common and expected: a bare name (e.g. \"Registon\") is often " +
+    "shared between an unrelated famous place/word and a genuine education business that added a " +
+    "business word to it (e.g. \"Registon LC\", \"Registon o'quv markazi\", website rgn.uz, listed on " +
+    "Google/Yandex Maps as a business with its own address, phone, and reviews). The single most " +
+    "prominent general search result for the bare name (a landmark, a Wikipedia page) is NOT proof " +
+    "that no business by that name exists — before concluding `isEducationInstitution: false`, you " +
+    "MUST specifically check Google/Yandex Maps business listings, the institution's own website if " +
+    "one is findable, Instagram/Telegram, and kursi24.uz/yellowpages.uz/goldenpages.uz for a business " +
+    "matching the name (see the search-variant suggestions in the query). Only set it to false once " +
+    "those checks turn up nothing, or clearly show every business-like result is actually the same " +
+    "unrelated landmark/place under a different pretext.\n\n" +
+    "Set `isEducationInstitution` to true once a source (official site, social page, maps listing, or " +
+    "directory entry) confirms a currently-operating education business by this name; set it to false " +
+    "if, after the checks above, the sources clearly show only the unrelated entity; set it to null if " +
+    "you genuinely cannot tell. If it is not confirmed true, leave every field in `fields` null/empty " +
+    "and `sourceUrls` empty — do NOT describe the unrelated entity instead, even if it is " +
+    "well-documented and would otherwise make for a rich-looking listing.\n\n" +
     "Once confirmed, check, in this order: (1) the institution's official website, " +
     "(2) its Instagram and Telegram pages, (3) kursi24.uz/uz (a directory dedicated to Uzbekistan " +
     "learning/course centers) and general Uzbekistan business directories yellowpages.uz and " +

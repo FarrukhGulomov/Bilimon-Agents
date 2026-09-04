@@ -621,6 +621,20 @@ remember what was typed at the CLI.
   museum phrases like "jahon merosi"/"tarixiy yodgorlik") alongside its
   existing medical-organization check, so even a false-`true` self-report
   is still caught before a record is built.
+- Follow-up to the above: the "Registon" name also collides with a real,
+  well-documented chain of learning centers ("Registon LC" / "Registon
+  o'quv markazi", website rgn.uz, multiple branches on Google/Yandex Maps)
+  — so the fix above must not overcorrect into rejecting every business
+  that happens to share a name with a landmark, either. The research
+  prompt (`services/llm-client.ts::researchInstitutionViaWebSearch`) now
+  explicitly tells the model that a bare name is often shared between an
+  unrelated famous place/word and a genuine business that appended a
+  business word to it, asks it to try business-oriented search variants
+  ("<name> LC", "<name> o'quv markazi", "<name> ta'lim markazi"), and
+  requires it to specifically check maps listings/official site/socials/
+  directories before concluding `isEducationInstitution: false` — the
+  single most prominent general search result being a landmark is not by
+  itself proof that no business by that name exists.
 
 ## Cost optimization notes
 
