@@ -424,9 +424,24 @@ export interface InstitutionResearchResult {
   /** The URLs the model says it actually opened/used. Recorded as the
    * evidence item's provenance and used as extra scrape targets. */
   sourceUrls: string[];
+  /** Real production failure: "look up by name" mode (RunOptions.
+   * institutionName) was tested with "Registon" — the Registan, a famous
+   * Samarkand historical monument, not a learning center — and this call
+   * happily researched and returned facts about it anyway, since nothing
+   * ever asked the model to verify the named entity IS an education
+   * institution before describing it. true only when the model actually
+   * confirmed (via a source) that the named entity is a currently-operating
+   * education/learning institution; false when it's clearly something else
+   * (a monument, museum, mosque, government office, company, product,
+   * person, etc.); null when the model could not determine this either way
+   * (treated the same as false by the caller — never assumed true). See
+   * researcher.ts::researchLive, which discards `fields`/`sourceUrls`
+   * entirely when this isn't true. */
+  isEducationInstitution: boolean | null;
 }
 
 const INSTITUTION_RESEARCH_SCHEMA = `{
+  "isEducationInstitution": boolean|null,
   "fields": {
     "nameUz": string|null, "nameRu": string|null, "nameLatin": string|null,
     "phone": string|null, "phone2": string|null, "email": string|null,
@@ -469,7 +484,16 @@ export async function researchInstitutionViaWebSearch(
 
   const instructions =
     "You are a deep-research agent preparing a marketplace listing for ONE named education " +
-    "institution in Uzbekistan. Check, in this order: (1) the institution's official website, " +
+    "institution in Uzbekistan. FIRST verify the named entity actually IS a real, " +
+    "currently-operating education/learning institution (a language center, tutoring service, " +
+    "course center, or exam-prep center) — not a historical monument, museum, mosque, government " +
+    "office, company, product, public figure, or anything else that merely shares or resembles the " +
+    "name. Set `isEducationInstitution` to true only once a source has actually confirmed this; set " +
+    "it to false if the sources clearly show it is something else; set it to null if you genuinely " +
+    "cannot tell. If it is not confirmed true, leave every field in `fields` null/empty and " +
+    "`sourceUrls` empty — do NOT describe the other entity instead, even if it is well-documented " +
+    "and would otherwise make for a rich-looking listing.\n\n" +
+    "Once confirmed, check, in this order: (1) the institution's official website, " +
     "(2) its Instagram and Telegram pages, (3) kursi24.uz/uz (a directory dedicated to Uzbekistan " +
     "learning/course centers) and general Uzbekistan business directories yellowpages.uz and " +
     "goldenpages.uz, all of which carry structured phone/address data that an institution's own site " +

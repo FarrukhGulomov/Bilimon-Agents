@@ -604,6 +604,23 @@ remember what was typed at the CLI.
   padding with generic filler when source material is too sparse.
 - Enum values are validated strictly — an unrecognized enum value is
   never silently accepted; it routes the record to `NEEDS_REVIEW`.
+- "Look up by name" mode (`RunOptions.institutionName`) verifies the named
+  entity actually IS a currently-operating education institution before
+  trusting anything it finds about it. Real production bug: given
+  "Registon" (the Registan, a Samarkand historical monument, not a
+  learning center), the per-institution research call happily researched
+  and returned facts about it, since nothing had asked it to check first.
+  Fixed with three layers: (1) the research prompt/schema
+  (`services/llm-client.ts`) now requires the model to self-report
+  `isEducationInstitution: true|false|null`, confirmed only once a source
+  actually shows it; (2) `agents/researcher.ts` discards the entire
+  research result (fields + source URLs) unless that flag is exactly
+  `true`, leaving a manually-looked-up non-institution with essentially no
+  evidence to build a listing from; (3) `services/relevance-filter.ts`
+  gained a deterministic `LANDMARK_KEYWORDS` backstop (heritage/monument/
+  museum phrases like "jahon merosi"/"tarixiy yodgorlik") alongside its
+  existing medical-organization check, so even a false-`true` self-report
+  is still caught before a record is built.
 
 ## Cost optimization notes
 

@@ -263,7 +263,16 @@ export async function researchLive(
       city: input.city,
       knownLinks: [input.website, input.telegram, input.instagram, input.facebook, input.sourceUrl],
     });
-    if (research) {
+    // Real production bug: "look up by name" mode was tested with
+    // "Registon" (the Registan, a Samarkand historical monument, not a
+    // learning center) and this call happily returned facts about it — the
+    // schema now asks the model to self-report whether the named entity is
+    // actually a currently-operating education institution
+    // (isEducationInstitution), and anything not explicitly confirmed true
+    // is discarded here rather than merged as if it were real evidence.
+    if (research && research.isEducationInstitution !== true) {
+      console.log(`Research: "${input.name}" not confirmed as an education institution — discarding research fields (isEducationInstitution=${research.isEducationInstitution}).`);
+    } else if (research) {
       const fields = normalizeResearchFields(research.fields);
       citedUrls = Array.isArray(research.sourceUrls)
         ? research.sourceUrls.filter((u): u is string => typeof u === "string" && /^https?:\/\//i.test(u))
