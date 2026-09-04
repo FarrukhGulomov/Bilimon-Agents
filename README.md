@@ -815,6 +815,27 @@ remember what was typed at the CLI.
   occurrences in the real reference export) makes this default a safe
   assumption, not a fabricated fact — the same one already accepted at
   export time.
+- Ninth follow-up: with the deliveryMode fix deployed, the user re-tested
+  "Registon" again and got the completely-empty "not confirmed as an
+  education institution" result — with NO code or prompt change between
+  this run and the prior run that had found rich, accurate data. This
+  confirms the failure mode is genuine run-to-run non-determinism in the
+  web-search-grounded call itself (different search results, different
+  sampling), not a bug a prompt wording change can fully eliminate — no
+  amount of further prompt tuning can guarantee a single LLM call always
+  lands the same way on a genuinely ambiguous case. `agents/researcher.ts::
+  researchLive`'s primary research call now retries up to
+  `MAX_RESEARCH_ATTEMPTS = 2` times when an attempt comes back without
+  confirming `isEducationInstitution: true` (whether because the model
+  said false/null, or the call failed/returned nothing parseable) before
+  accepting that as the final answer — stopping as soon as any attempt
+  actually confirms the institution. This is cheap insurance against one
+  bad roll costing an otherwise-real institution its evidence entirely.
+  Not eliminable in principle from this sandbox (no network access to
+  reproduce/tune against the real model), and not a promise of 100%
+  reliability — if "Registon" still comes back empty after two attempts,
+  that's a real "the model couldn't confirm it even twice" outcome worth
+  reporting, not a code bug to chase further via prompt wording.
 
 ## Cost optimization notes
 
