@@ -185,6 +185,39 @@ export function matchCityNames(briefLower: string): { matched: string[]; hits: s
   return { matched: [...matched], hits: [...hits] };
 }
 
+/**
+ * Infers an institution's `type` and `categories` from its own researched
+ * text (name, programs, specializations, achievements, description) using
+ * the same deterministic TYPE_KEYWORDS/CATEGORY_KEYWORDS tables that
+ * resolveBriefHeuristic uses for a user's brief — reused here for the
+ * opposite direction: classifying one institution's own evidence rather
+ * than a discovery brief.
+ *
+ * Real production bug: "look up by name" mode (RunOptions.institutionName)
+ * bypasses discovery entirely, so `fields.type`/`fields.categories` were
+ * NEVER set before content generation (only discovery ever set them, via
+ * `cand.type`/`cand.category`) — agents/content-manager.ts::
+ * assessContentMaterial requires an institution type/category to consider
+ * there enough material to write a description, so every manually-looked-up
+ * institution got `descriptionUz`/`descriptionRu: null` regardless of how
+ * much real evidence (programs, achievements, founding year, ...) was
+ * actually found. Observed on a real run: "Registon o'quv markazi" came
+ * back with real phone/website/telegram/programs/achievements but empty
+ * descriptions. This infers type/categories from the SAME verified text
+ * already used elsewhere (no new facts, no LLM call) so that gate can pass
+ * on real evidence instead of defaulting to null.
+ *
+ * Returns `{ type: null, categories: [] }` when nothing matched — callers
+ * must not treat that as a rejection, only as "could not classify".
+ */
+export function inferTypeAndCategoriesFromText(text: string): { type: InstitutionType | null; categories: Category[] } {
+  const lower = text.trim().toLowerCase();
+  if (!lower) return { type: null, categories: [] };
+  const { matched: types } = matchKeywords(lower, TYPE_KEYWORDS);
+  const { matched: categories } = matchKeywords(lower, CATEGORY_KEYWORDS);
+  return { type: types[0] ?? null, categories: [...new Set(categories)] };
+}
+
 export function resolveBriefHeuristic(brief: string): DiscoveryScope {
   const briefLower = brief.trim().toLowerCase();
   const { matched: types, hits: typeHits } = matchKeywords(briefLower, TYPE_KEYWORDS);

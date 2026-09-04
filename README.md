@@ -635,6 +635,24 @@ remember what was typed at the CLI.
   directories before concluding `isEducationInstitution: false` — the
   single most prominent general search result being a landmark is not by
   itself proof that no business by that name exists.
+- Second follow-up: once "Registon LC" was correctly found, its real
+  phone/website/telegram/programs/achievements exported fine, but
+  `descriptionUz`/`descriptionRu` both came back `null`. Root cause:
+  "look up by name" mode has no discovery step, so `fields.type`/
+  `fields.categories` — normally filled from `cand.type`/`cand.category`,
+  which only discovery ever sets — stayed empty all the way into content
+  generation, and `agents/content-manager.ts::assessContentMaterial`
+  requires a type/category before it considers there enough material to
+  write a description, so it always came back insufficient regardless of
+  how much other real evidence existed. Fixed by
+  `services/brief-parser.ts::inferTypeAndCategoriesFromText`, which reuses
+  the same deterministic `TYPE_KEYWORDS`/`CATEGORY_KEYWORDS` tables
+  `resolveBriefHeuristic` already uses for a discovery brief, but in the
+  opposite direction: classifying an institution's OWN researched text
+  (programs, specializations, achievements, description) instead of a
+  user's brief. `agents/orchestrator.ts` now calls it whenever discovery
+  didn't already supply a type/category, so content generation runs on the
+  same real facts that were already found.
 
 ## Cost optimization notes
 
