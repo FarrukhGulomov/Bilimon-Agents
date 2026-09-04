@@ -32,6 +32,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { slugify, normalizePhone, generateId, generateDuplicateBookkeepingId, generateBilimonRecordId, normalizeNameKey, normalizeLanguages, normalizeLanguageCode } from "../src/services/normalizer.js";
 import { resolveCity } from "../src/services/location-mapper.js";
+import { findCoursePageLinks, extractHeaderNavHtml } from "../src/services/link-discovery.js";
 import { deterministicDedupe } from "../src/services/deduplicator.js";
 import { validateRecord, validateBatch } from "../src/services/validator.js";
 import {
@@ -60,7 +61,7 @@ import { discoverMock, mapSearchResultToCandidate, mapKursi24ListingToCandidate 
 import { parseKursi24DetailPage, inferCategoriesFromLabels, inferTypesFromLabels } from "../src/services/kursi24.js";
 import { buildScopeInstruction } from "../src/services/search.js";
 import { assessContentMaterial } from "../src/agents/content-manager.js";
-import { classifySourceUrl, normalizeResearchFields, scoreEvidenceItems, mergeEvidence } from "../src/agents/researcher.js";
+import { classifySourceUrl, normalizeResearchFields, scoreEvidenceItems, mergeEvidence, isLikelyRealProgramName } from "../src/agents/researcher.js";
 import {
   computeDataCompleteness,
   computeEvidenceConfidence,
@@ -1702,6 +1703,108 @@ console.log("28. mergeEvidence unions list fields across sources instead of lett
   }
   assert(fields.programs!.filter((p) => p.toLowerCase() === "ielts").length === 1, "a program named identically by both sources is de-duplicated, not doubled");
   assert(fields.specializations!.length === 2, `specializations from both sources are combined (got ${JSON.stringify(fields.specializations)})`);
+}
+
+console.log("29. normalizeResearchFields drops search-result-headline junk out of programs/specializations (src/agents/researcher.ts::isLikelyRealProgramName)");
+{
+  // Real production bug: a real run for "Registon o'quv markazi" returned
+  // `programs` full of actual SEO-style search RESULT TITLES about the
+  // institution, not real course names — these exact strings were observed
+  // in the real exported JSON.
+  const instituteNames = ["Registon o'quv markazi", "Регистон учебный центр"];
+  const junk = [
+    "REGISTON o'quv markazlari tarmog'i (filiallar)",
+    "Farg'ona va Farg'ona viloyatidagi o'quv markazi",
+    "O‘zbekistondagi o‘quv markazi",
+    "O'zbekistonda ingliz tili kurslari",
+    "O'zbekistonda xorijiy tillar kurslari",
+  ];
+  for (const item of junk) {
+    assert(!isLikelyRealProgramName(item, instituteNames), `"${item}" is recognized as search-result junk, not a real course name`);
+  }
+  const real = ["General English", "IELTS", "CEFR (ingliz tili)", "Abituriyent fanlar", "Ingliz tili o'qitish", "IELTS tayyorlov kurslari"];
+  for (const item of real) {
+    assert(isLikelyRealProgramName(item, instituteNames), `"${item}" (a real course/specialization name) is NOT flagged as junk`);
+  }
+
+  const normalized = normalizeResearchFields({
+    nameUz: "Registon o'quv markazi",
+    programs: [...junk, "General English", "IELTS"],
+    specializations: ["REGISTON o'quv markazlari tarmog'i (filiallar)", "Ingliz tili o'qitish"],
+  });
+  assert(
+    JSON.stringify(normalized.programs) === JSON.stringify(["General English", "IELTS"]),
+    `normalizeResearchFields strips the junk from programs end-to-end (got ${JSON.stringify(normalized.programs)})`
+  );
+  assert(
+    JSON.stringify(normalized.specializations) === JSON.stringify(["Ingliz tili o'qitish"]),
+    `normalizeResearchFields strips the junk from specializations end-to-end (got ${JSON.stringify(normalized.specializations)})`
+  );
+}
+
+console.log("30. findCoursePageLinks discovers a courses/subjects nav link from an institution's own homepage (src/services/link-discovery.ts)");
+{
+  // Real production gap: the user asked directly why the pipeline doesn't
+  // open an institution's own site and read its pages — e.g. rgn.uz has a
+  // "Kurslar" nav link to rgn.uz/kurslar/, a page listing every real
+  // course. The supplementary scrape previously only ever visited URLs
+  // already known in advance and never looked at a fetched homepage's OWN
+  // markup for a link like this. This synthetic nav snippet is shaped like
+  // a typical Uzbek institution homepage's menu (not scraped real data).
+  const homepageHtml = `
+    <html><body>
+      <nav>
+        <a href="/">Bosh sahifa</a>
+        <a href="/kurslar/">Kurslar</a>
+        <a href="/about">Biz haqimizda</a>
+        <a href="/contact">Aloqa</a>
+        <a href="https://www.instagram.com/registan_lc">Instagram</a>
+      </nav>
+    </body></html>`;
+  const links = findCoursePageLinks(homepageHtml, "https://rgn.uz/");
+  assert(links.includes("https://rgn.uz/kurslar/"), `the "Kurslar" nav link is discovered and resolved to an absolute URL (got ${JSON.stringify(links)})`);
+  assert(!links.some((l) => l.includes("instagram.com")), "an unrelated social link is not mistaken for a courses page");
+  assert(!links.some((l) => l.includes("/about") || l.includes("/contact")), "unrelated nav links (about/contact) are not matched");
+
+  const russianNav = `<a href="/programmy">Курсы и направления</a>`;
+  const ruLinks = findCoursePageLinks(russianNav, "https://example.uz/");
+  assert(ruLinks.includes("https://example.uz/programmy"), `a Russian-language "Курсы" link is also discovered (got ${JSON.stringify(ruLinks)})`);
+
+  assert(findCoursePageLinks("", "https://example.uz/").length === 0, "empty HTML yields no links rather than throwing");
+  assert(findCoursePageLinks("<a href=\"javascript:void(0)\">Kurslar</a>", "https://example.uz/").length === 0, "a javascript: pseudo-link is never followed even if its text matches");
+
+  // Follow-up to the user's explicit ask: look at the HEADER navigation
+  // buttons specifically, not just any link on the page — a body paragraph
+  // that happens to mention "kurs" in passing is a much weaker signal than
+  // a real top-nav menu item.
+  const pageWithHeaderAndBody = `
+    <html><body>
+      <header>
+        <a href="/kurslar/">Kurslar</a>
+        <a href="/about">Biz haqimizda</a>
+      </header>
+      <main>
+        <p>Bizning <a href="/blog/kurs-narxlari-2026">kurs narxlari</a> haqida maqola.</p>
+      </main>
+    </body></html>`;
+  const headerNavHtml = extractHeaderNavHtml(pageWithHeaderAndBody);
+  assert(headerNavHtml.includes("Kurslar"), "extractHeaderNavHtml pulls out the <header> region's content");
+  const scopedLinks = findCoursePageLinks(pageWithHeaderAndBody, "https://rgn.uz/");
+  assert(
+    JSON.stringify(scopedLinks) === JSON.stringify(["https://rgn.uz/kurslar/"]),
+    `when the header nav has a real match, an incidental in-body mention is ignored (got ${JSON.stringify(scopedLinks)})`
+  );
+
+  // When neither <header> nor <nav> matches (or exists), fall back to
+  // scanning the whole page rather than giving up — some real sites don't
+  // use semantic header/nav tags at all.
+  const noHeaderPage = `<html><body><div class="topmenu"><a href="/kurslar/">Kurslar</a></div></body></html>`;
+  assert(extractHeaderNavHtml(noHeaderPage) === "", "a page with no <header>/<nav> tags extracts an empty header/nav region");
+  const fallbackLinks = findCoursePageLinks(noHeaderPage, "https://rgn.uz/");
+  assert(
+    fallbackLinks.includes("https://rgn.uz/kurslar/"),
+    `with no <header>/<nav> region at all, the whole-page fallback still finds the link (got ${JSON.stringify(fallbackLinks)})`
+  );
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

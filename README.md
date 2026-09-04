@@ -671,6 +671,91 @@ remember what was typed at the CLI.
   strengthened to explicitly ask for a COMPLETE program/specialization
   list (checking a site's dedicated courses/subjects page, not just its
   homepage) rather than the one or two most prominent items.
+- Fourth follow-up: after that fix, the union-merged `programs` were more
+  numerous but also visibly wrong — entries like "REGISTON o'quv
+  markazlari tarmog'i (filiallar)", "Chirchiqda ingliz tili kurslari", and
+  "O'zbekistonda ingliz tili kurslari" alongside real course names like
+  "General English"/"IELTS". These are SEO-style search-RESULT TITLES
+  about the institution (the kind of headline a search engine shows for a
+  page ABOUT the business), not real course names — the model conflated
+  "search results describing the institution" with "courses the
+  institution teaches", confirmed against the real institution's own
+  https://rgn.uz/kurslar/ page, which lists actual course names ("General
+  English", "IELTS", "CEFR (ingliz tili)", "Abituriyent fanlar", ...) with
+  no city/country/business-description phrasing at all. Fixed two ways:
+  (1) the research prompt now gives concrete negative examples of exactly
+  this failure and an explicit rule that a real course name never mentions
+  a city, region, the country, or the institution's own name; (2)
+  `agents/researcher.ts::normalizeResearchFields` gained a deterministic
+  `isLikelyRealProgramName` backstop that drops any `programs`/
+  `specializations` entry repeating the institution's own name or matching
+  known junk-phrase shapes ("o'quv markaz", "filial", "tarmog'i",
+  "shahrida(gi)", "viloyatidagi", "o'zbekiston(da)", "eng yaxshi", "top N
+  ..."), applied regardless of which evidence source produced it. This is
+  a best-effort keyword backstop, not a generic classifier — a
+  city-name-based headline for a city not in this heuristic's pattern list
+  (e.g. one that doesn't say "shahrida"/"viloyatida") could still slip
+  through; the prompt fix is the primary defense for cases the keyword
+  list doesn't anticipate.
+- On "why doesn't it just crawl the site like a human would" (the user's
+  direct question): this pipeline's real-mode research is a web-search-
+  grounded LLM call (`services/llm-client.ts::researchInstitutionViaWebSearch`,
+  OpenAI's hosted `web_search` tool), not a purpose-built crawler for
+  arbitrary institution websites — unlike `services/kursi24.ts`, which can
+  afford to be a precise, hand-written scraper because it targets exactly
+  ONE known site with fixed markup. Writing an equivalent for every
+  institution's own unknown, arbitrarily-structured website (find the
+  right nav link, open it, parse whatever markup that specific site
+  happens to use) is a much larger, per-site-fragile undertaking, and this
+  sandbox has no network access to iterate against real sites while
+  building it. The prompt now explicitly tells the model to look for and
+  open a dedicated courses/subjects page by name (`services/llm-client.ts`,
+  same follow-up as above) — whether the underlying model's web-search
+  tool actually opens that specific page is a real-mode behavior this
+  sandbox cannot verify directly; the user re-testing against the deployed
+  pipeline is the only way to confirm it in practice.
+- Fifth follow-up, going beyond the prompt-only answer above: the
+  supplementary HTML scrape (`agents/researcher.ts`, the deterministic
+  fetch-and-extract path that runs alongside the web-search call) only
+  ever visited URLs already known in advance — the homepage itself, or a
+  URL the web-search call happened to cite — and never looked AT a fetched
+  homepage's own markup for a link to a page like rgn.uz's "Kurslar" nav
+  item. Added `services/link-discovery.ts::findCoursePageLinks`: a small,
+  generic (not site-specific, unlike `services/kursi24.ts`) regex-based
+  scan of a fetched page's `<a>` tags for link text/href matching
+  courses-page keywords in Uzbek/Russian/English ("Kurslar", "Yo'nalishlar",
+  "Fanlar", "Курсы", "Направления", "Courses", "Programs"). `researchLive`
+  now runs this against any fetched page that IS the institution's own
+  website and, if it finds a matching link, queues that page for scraping
+  too — bounded (`MAX_DISCOVERED_TARGETS = 2`) so this is "follow one
+  obvious nav link one hop deep", never unbounded crawling of an unknown
+  site. This is a genuine code-level improvement (not just a prompt
+  change) to the exact gap the user asked about directly — but it is still
+  a keyword-matching heuristic against unknown, arbitrary site markup, not
+  a guarantee: a site whose nav uses a completely different word for its
+  courses page, or renders its nav via JavaScript rather than plain HTML
+  `<a>` tags, won't be discovered this way.
+- Sixth follow-up, per the user's explicit ask: the deterministic
+  discovery above should look at the HEADER navigation buttons a human
+  would actually click, not treat an incidental in-body mention of a
+  keyword the same as a real top-nav menu item. `findCoursePageLinks` now
+  scopes its match to `<header>`/`<nav>` regions first via the new
+  `extractHeaderNavHtml`, and only falls back to scanning the whole page
+  when no `<header>`/`<nav>` region matched (either the site doesn't use
+  those tags, or its real nav genuinely doesn't have a match) — so a
+  courses link actually in the header wins over, say, a blog post that
+  happens to mention "kurs narxlari" ("course prices") in passing. The
+  user's related ask — that the agent should recognize a courses-page
+  button even under a name outside the fixed keyword list, by actually
+  reading/understanding the label — is a semantic judgment call, which is
+  exactly what an LLM (not a keyword regex) is suited for: the research
+  prompt (`services/llm-client.ts::researchInstitutionViaWebSearch`) now
+  explicitly asks the model to look at the site's own header/top nav and
+  use its own judgment on the actual label it sees, whatever the phrasing
+  or language, rather than only matching a fixed keyword list. The
+  deterministic `findCoursePageLinks` backstop still only recognizes
+  known-keyword labels — a genuinely unfamiliar term is real-mode LLM
+  judgment's job, not this heuristic's.
 
 ## Cost optimization notes
 

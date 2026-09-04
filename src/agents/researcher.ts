@@ -35,6 +35,7 @@ import { dirname, join } from "node:path";
 import type { EvidenceItem, RawExtractedFields, ResearchRecord } from "../types/index.js";
 import { fetchAndCache } from "../services/scraper.js";
 import { extractFieldsFromText } from "../services/extractor.js";
+import { findCoursePageLinks } from "../services/link-discovery.js";
 import { computeEvidenceConfidence, countCorroboratedFields } from "../services/scoring.js";
 import { handleProviderError, researchInstitutionViaWebSearch } from "../services/llm-client.js";
 
@@ -161,6 +162,39 @@ export function classifySourceUrl(url: string): EvidenceItem["sourceType"] {
   return "other";
 }
 
+// Real production bug: real-mode web-search research for "Registon o'quv
+// markazi" returned `programs` entries that were actually SEO-style search
+// RESULT TITLES about the institution — "REGISTON o'quv markazlari
+// tarmog'i (filiallar)", "Chirchiqda ingliz tili kurslari", "O'zbekistonda
+// ingliz tili kurslari", "Farg'ona va Farg'ona viloyatidagi o'quv markazi"
+// — instead of real course/subject names ("General English", "IELTS",
+// "CEFR (ingliz tili)", as actually listed on the institution's own
+// rgn.uz/kurslar/ page). The model conflated "search results ABOUT the
+// institution" with "courses OFFERED by the institution". A phrase that
+// repeats the institution's own name, or is a city/branch/marketing
+// description rather than a subject name, is never a real course — this
+// is a deterministic backstop that drops it before export, on top of the
+// prompt asking the model not to do this in the first place (see
+// llm-client.ts::researchInstitutionViaWebSearch).
+// Uzbek text in the wild mixes the straight apostrophe ('), the curly ones
+// (' '), and the modifier letter turned comma (ʻ) for the same sound —
+// real observed input used U+2018 ("O‘zbekistondagi o‘quv markazi") — so
+// the optional-apostrophe slot below must match all of them, not just '.
+const APOSTROPHE = "['‘’ʻʼ]?";
+const JUNK_PROGRAM_PATTERN = new RegExp(
+  `(o${APOSTROPHE}quv markaz|filial|tarmog|shahrida|shahridagi|viloyatidagi|eng yaxshi|top\\s*\\d*\\s*(kurs|markaz)|o${APOSTROPHE}zbekiston|uzbekistan|узбекистан)`,
+  "i"
+);
+
+/** Pure and exported for offline testing. */
+export function isLikelyRealProgramName(item: string, instituteNames: (string | null | undefined)[]): boolean {
+  const lower = item.toLowerCase();
+  for (const name of instituteNames) {
+    if (name && name.trim().length > 0 && lower.includes(name.trim().toLowerCase())) return false;
+  }
+  return !JUNK_PROGRAM_PATTERN.test(lower);
+}
+
 /**
  * Normalizes whatever the research call returned into RawExtractedFields:
  * drops nulls, empty strings and empty arrays (so an "I found nothing"
@@ -183,10 +217,14 @@ export function normalizeResearchFields(raw: Record<string, unknown> | null | un
     const value = raw[key];
     if (typeof value === "string" && value.trim().length > 0) out[key] = value.trim();
   }
+  const instituteNames = [out.nameUz, out.nameRu, out.nameLatin] as (string | undefined)[];
   for (const key of arrayFields) {
     const value = raw[key];
     if (!Array.isArray(value)) continue;
-    const items = value.filter((v): v is string => typeof v === "string" && v.trim().length > 0).map((v) => v.trim());
+    let items = value.filter((v): v is string => typeof v === "string" && v.trim().length > 0).map((v) => v.trim());
+    if (key === "programs" || key === "specializations") {
+      items = items.filter((item) => isLikelyRealProgramName(item, instituteNames));
+    }
     if (items.length > 0) out[key] = items;
   }
   for (const key of numberFields) {
@@ -297,13 +335,41 @@ export async function researchLive(
   }
 
   // --- Source 2 (supplementary, best-effort): plain HTML scrape.
-  for (const url of buildScrapeTargets(input, citedUrls)) {
+  // Real production gap (the user's direct question: why doesn't this read
+  // an institution's own site pages?): this loop used to only ever visit
+  // URLs already known in advance (the homepage, cited search-result
+  // URLs) — a course-listing page one click away from the homepage (e.g.
+  // rgn.uz's "Kurslar" nav link to rgn.uz/kurslar/) was read only when the
+  // primary web-search call happened to cite it directly. The loop is a
+  // live queue (`scrapeTargets`, grown in place — a `for...of` over an
+  // array DOES observe elements pushed during iteration) so that when a
+  // fetched page is the institution's OWN website and its markup links to
+  // a courses/subjects page, that page gets queued and scraped too —
+  // bounded by MAX_DISCOVERED_TARGETS so this stays "follow one obvious
+  // link", never unbounded crawling of an unknown site.
+  const initialTargets = buildScrapeTargets(input, citedUrls);
+  const scrapeTargets = [...initialTargets];
+  const seenTargets = new Set(scrapeTargets);
+  const MAX_DISCOVERED_TARGETS = 2;
+  for (const url of scrapeTargets) {
     try {
       const page = await fetchAndCache(url);
       // No text is the NORMAL case for login-walled socials, JS-only sites
       // and 403s — silent, not an error, and never the only path to
       // evidence any more.
       if (!page.text || page.text.length < 200) continue;
+      if (
+        classifySourceUrl(url) === "website" &&
+        page.html &&
+        scrapeTargets.length < initialTargets.length + MAX_DISCOVERED_TARGETS
+      ) {
+        for (const link of findCoursePageLinks(page.html, url)) {
+          if (seenTargets.has(link)) continue;
+          if (scrapeTargets.length >= initialTargets.length + MAX_DISCOVERED_TARGETS) break;
+          seenTargets.add(link);
+          scrapeTargets.push(link);
+        }
+      }
       const extracted = await extractFieldsFromText(url, page.text);
       const fields = normalizeResearchFields(extracted as Record<string, unknown>);
       if (Object.keys(fields).length === 0) continue;
