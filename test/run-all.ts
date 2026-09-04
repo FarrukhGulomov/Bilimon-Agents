@@ -71,7 +71,7 @@ import {
 import type { EvidenceItem, RawExtractedFields } from "../src/types/index.js";
 import { buildExportRecord, exportFinalArtifacts } from "../src/agents/bilimon-exporter.js";
 import { detectNonEducationalOrg } from "../src/services/relevance-filter.js";
-import { resolveExportIdentity, dedupeCandidates, maxTotalRaw, buildResultRow } from "../src/agents/orchestrator.js";
+import { resolveExportIdentity, dedupeCandidates, maxTotalRaw, buildResultRow, runPipeline } from "../src/agents/orchestrator.js";
 import { selectResearchEvidenceSource } from "../src/agents/researcher.js";
 import { parseRunRequest } from "../src/server.js";
 import type { BilimOnExportRecord, StateRecord } from "../src/types/index.js";
@@ -1421,6 +1421,16 @@ console.log("20. Web frontend request validation (src/server.ts::parseRunRequest
   assert(!("error" in topOnlyDefault) && topOnlyDefault.topOnly === false, "topOnly defaults to false when omitted");
   const topOnlyTruthyJunk = parseRunRequest(JSON.stringify({ count: 5, topOnly: "yes" }));
   assert(!("error" in topOnlyTruthyJunk) && topOnlyTruthyJunk.topOnly === false, "a non-boolean-true topOnly value (e.g. a stray string) is treated as false, never truthy-coerced");
+
+  // "Look up by name" mode.
+  const withName = parseRunRequest(JSON.stringify({ institutionName: "Najot Ta'lim", count: 5 }));
+  assert(!("error" in withName) && withName.institutionName === "Najot Ta'lim", `institutionName is passed through trimmed (got "${!("error" in withName) ? withName.institutionName : "n/a"}")`);
+  const noName = parseRunRequest(JSON.stringify({ count: 5 }));
+  assert(!("error" in noName) && noName.institutionName === undefined, "institutionName is undefined when omitted");
+  const blankName = parseRunRequest(JSON.stringify({ institutionName: "   ", count: 5 }));
+  assert(!("error" in blankName) && blankName.institutionName === undefined, "a whitespace-only institutionName normalizes to undefined, falling back to broad-discovery mode");
+  const nonStringName = parseRunRequest(JSON.stringify({ institutionName: 42, count: 5 }));
+  assert("error" in nonStringName, "a non-string institutionName is rejected");
 }
 
 console.log("21. Retry-until-target discovery ceiling (src/agents/orchestrator.ts::maxTotalRaw)");
@@ -1531,6 +1541,35 @@ console.log("24. Results table shows which discovery source found each instituti
   };
   const searchRow = buildResultRow("test-never-persisted-search", searchCand);
   assert(searchRow.source === "LLM qidiruv", `a web_search candidate's row is labeled "LLM qidiruv" (got "${searchRow.source}")`);
+}
+
+console.log("25. \"Look up by name\" mode bypasses discovery entirely and processes exactly one candidate (src/agents/orchestrator.ts::runPipeline)");
+{
+  // Real user request: type one specific institution's name and have it
+  // researched directly, instead of the broad discovery machinery.
+  const rawName = "Test Lookup Institute Never A Real Fixture Match";
+  const id = generateId(normalizeNameKey(rawName), "");
+  const cleanupPaths = [
+    join(DATA_STATE_DIR, `${id}.json`),
+    join(DATA_PROCESSED_DIR, `${id}.json`),
+    join(DATA_REVIEW_DIR, `${id}.json`),
+  ];
+  for (const p of cleanupPaths) if (existsSync(p)) unlinkSync(p);
+
+  try {
+    const summary = await runPipeline({ count: 5, mock: true, institutionName: rawName });
+    assert(summary.processedIds.length === 1, `exactly one candidate is processed regardless of count=5 (got ${summary.processedIds.length})`);
+    assert(summary.results.length === 1, `results carries exactly one row (got ${summary.results.length})`);
+    assert(summary.results[0].name === rawName, `the result row carries the looked-up name (got "${summary.results[0].name}")`);
+    assert(summary.results[0].source === "qo'lda", `the result row is labeled as a manual lookup (got "${summary.results[0].source}")`);
+    assert(summary.searchExhausted === true, "a named lookup always reports searchExhausted (no broader search space to expand)");
+    assert(summary.duplicateIds.length === 0, "a named lookup never merges duplicates (there's only ever one candidate)");
+    // This name matches no mock-research fixture, so it should NOT be
+    // approved — confirming the mode doesn't fabricate a pass.
+    assert(summary.approved === 0 && summary.shortfall === 1, `an unmatched name in mock mode ends up needsReview/rejected, not falsely approved (approved=${summary.approved}, shortfall=${summary.shortfall})`);
+  } finally {
+    for (const p of cleanupPaths) if (existsSync(p)) unlinkSync(p);
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

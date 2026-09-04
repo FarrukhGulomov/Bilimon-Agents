@@ -16,7 +16,7 @@ import { generateContent } from "./content-manager.js";
 import { buildExportRecord, exportFinalArtifacts, writeProcessedRecord, readProcessedRecord } from "./bilimon-exporter.js";
 import { scoreInstitution } from "../services/scoring.js";
 import { validateRecord } from "../services/validator.js";
-import { generateDuplicateBookkeepingId, generateId, normalizeNameKey, slugify } from "../services/normalizer.js";
+import { generateDuplicateBookkeepingId, generateId, normalizeNameKey, slugify, sha256 } from "../services/normalizer.js";
 import { runWithConcurrency } from "../services/concurrency.js";
 import { loadExecutionConfig } from "../services/execution-config.js";
 import { resolveBrief, type DiscoveryScope } from "../services/brief-parser.js";
@@ -126,6 +126,15 @@ export interface RunOptions {
    * RunSummary.topRecords). Default false — unchanged behavior for every
    * existing caller. */
   topOnly?: boolean;
+  /** "Look up by name" mode — real user request: type one specific
+   * institution's name and have it researched directly, skipping the broad
+   * discovery machinery (LLM-search facets, kursi24 crawl) entirely, since
+   * the name is already known. When set (non-empty after trim), `count`,
+   * `topOnly`, and the whole discovery/dedupe/retry-until-target machinery
+   * are ignored — runPipeline() runs exactly this one candidate through the
+   * same research → content → export → quality gate pipeline as every
+   * other candidate and returns. */
+  institutionName?: string;
 }
 
 /** One row of this run's results for a UI table (src/server.ts's
@@ -531,6 +540,57 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
       writeState(state); // stay in current state, retry on next run
       return "retry-pending";
     }
+  }
+
+  // "Look up by name" mode — see RunOptions.institutionName's doc comment.
+  // Bypasses discovery/dedupe/the retry-until-target loop entirely: there's
+  // nothing to discover or dedupe against when the caller already named the
+  // one institution they want, and "search until target met" has no
+  // meaning for a target of exactly one already-identified name.
+  if (opts.institutionName && opts.institutionName.trim().length > 0) {
+    const rawName = opts.institutionName.trim();
+    const cand: DiscoveryCandidate = {
+      discoveryId: `manual://${sha256(rawName)}`,
+      rawName,
+      sourceType: "manual",
+      discoveredAt: new Date().toISOString(),
+    };
+    const id = generateId(normalizeNameKey(cand.rawName), cand.city ?? "");
+    processedIds.push(id);
+
+    const outcome = await processCandidate(cand);
+    if (outcome === "approved") approved++;
+    else if (outcome === "needsReview") needsReview++;
+    else if (outcome === "rejected") rejectedCount++;
+    opts.onProgress?.({ completed: 1, total: 1, approved, needsReview, rejected: rejectedCount, duplicates: 0 });
+
+    const row = buildResultRow(id, cand);
+    results.push(row);
+    if (row.status === "needsReview") {
+      const rec = readProcessedRecord(id);
+      if (rec) needsReviewRecords.push(rec);
+    }
+
+    const shortfall = approved >= 1 ? 0 : 1;
+    if (shortfall > 0) {
+      console.log(`Ogohlantirish: "${rawName}" nomli institut haqida yetarli ma'lumot tasdiqlanmadi (holat: ${row.status}).`);
+    }
+
+    return {
+      processedIds,
+      duplicateIds,
+      approved,
+      needsReview,
+      rejected: rejectedCount,
+      resolvedScope: scope,
+      results,
+      shortfall,
+      // No broader search space to expand for a single named lookup — this
+      // is never "hit a cost ceiling", so always report exhausted.
+      searchExhausted: true,
+      needsReviewRecords,
+      topRecords: [],
+    };
   }
 
   const { maxConcurrency, progressReportEvery } = loadExecutionConfig();

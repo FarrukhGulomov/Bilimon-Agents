@@ -49,12 +49,16 @@ async function cmdRun(flags: Record<string, string | boolean>) {
   const mock = isMock(flags);
   const brief = typeof flags.brief === "string" ? flags.brief : undefined;
   const topOnly = Boolean(flags.top);
+  const institutionName = typeof flags.name === "string" ? flags.name : undefined;
   if (!mock && !hasApiKey()) {
     console.error(new MissingApiKeyError().message);
     process.exitCode = 1;
     return;
   }
-  console.log(`Running pipeline: count=${count} mock=${mock}${brief ? ` brief="${brief}"` : ""}${topOnly ? " top=true" : ""}`);
+  console.log(
+    `Running pipeline: count=${count} mock=${mock}${brief ? ` brief="${brief}"` : ""}${topOnly ? " top=true" : ""}` +
+      (institutionName ? ` name="${institutionName}"` : "")
+  );
   let summary;
   try {
     summary = await runPipeline({
@@ -62,6 +66,7 @@ async function cmdRun(flags: Record<string, string | boolean>) {
       mock,
       brief,
       topOnly,
+      institutionName,
       onProgress: (p) =>
         console.log(
           `progress: processed ${p.completed}/${p.total}, approved ${p.approved}, ` +
@@ -182,7 +187,7 @@ async function main() {
         break;
       default:
         console.log(
-          'Usage: pipeline <run|validate|export> [--count N] [--mock] [--brief "<free text>"] [--top] [--print-import]'
+          'Usage: pipeline <run|validate|export> [--count N] [--mock] [--brief "<free text>"] [--top] [--name "<institution name>"] [--print-import]'
         );
         process.exitCode = command ? 1 : 0;
     }
