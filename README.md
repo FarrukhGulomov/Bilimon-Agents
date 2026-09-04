@@ -756,6 +756,29 @@ remember what was typed at the CLI.
   deterministic `findCoursePageLinks` backstop still only recognizes
   known-keyword labels — a genuinely unfamiliar term is real-mode LLM
   judgment's job, not this heuristic's.
+- Seventh follow-up: after the sixth follow-up shipped, the user re-tested
+  "Registon" and got a complete regression — the exact "not confirmed as
+  an education institution" empty result from before ANY of these fixes,
+  even though the same lookup had previously succeeded (finding "Registon
+  LC" with real contact details, description, and programs). Root cause
+  (most likely): `researchInstitutionViaWebSearch`'s instructions had
+  grown, across five separate follow-up fixes each adding its own
+  paragraph, into ~15 dense paragraphs stacking "IMPORTANT"/"CRITICAL"/
+  "HARD RULE" warnings on top of each other, with the same rule ("leave
+  fields null when unsure") restated three different ways. A long,
+  repetitive instruction block makes an LLM more likely to default to the
+  safest/most conservative answer (`isEducationInstitution: false/null`,
+  everything else empty) rather than reliably doing the actual multi-step
+  verification work the prompt asks for. Fixed by rewriting the whole
+  instructions block from scratch: every substantive rule from the five
+  prior fixes is kept, but each is stated exactly ONCE, in a tight
+  STEP 1/STEP 2/STEP 3/HARD RULE structure, roughly half the length of
+  the version it replaced. This is inherently hard to verify from this
+  sandbox (no network access to the real model, and web-search-grounded
+  LLM calls carry run-to-run variance regardless) — if "Registon" still
+  comes back empty after this, that's the next thing to report back with
+  the exact result shown, since it would mean the issue is something other
+  than prompt length/density.
 
 ## Cost optimization notes
 
