@@ -521,6 +521,13 @@ export async function researchInstitutionViaWebSearch(
     "(phone, second phone, email, website, telegram, instagram), address and city, the programs/" +
     "courses it actually offers, its specializations, teaching languages, class shifts, founding " +
     "year, student and teacher counts, and any achievements/accreditations it genuinely claims. " +
+    "`programs` and `specializations` must be as COMPLETE as the sources actually allow, not just " +
+    "the one or two the homepage happens to headline — if the official site has a dedicated courses/" +
+    "subjects page (often linked as \"Kurslar\", \"Yo'nalishlar\", \"Fanlar\", \"Курсы\", \"Направления\", " +
+    "or similar in the site's own menu), open it and list every subject/course/direction it names, " +
+    "not just the first few. A real center commonly teaches many subjects at once (e.g. multiple " +
+    "languages, school subjects, exam prep, IT); report all of them if the sources show them, and " +
+    "only report fewer when the sources genuinely only describe fewer. " +
     "Put any price information you find (e.g. monthly fee ranges) in `pricingNote` as plain text " +
     "quoting what the source says — do not convert or estimate.\n\n" +
     "`descriptionSourceText` must be 2-5 factual sentences about this institution in its own terms, " +
