@@ -653,6 +653,24 @@ remember what was typed at the CLI.
   user's brief. `agents/orchestrator.ts` now calls it whenever discovery
   didn't already supply a type/category, so content generation runs on the
   same real facts that were already found.
+- Third follow-up: with real descriptions now generating, the user reported
+  that "Registon" teaches far more subjects than the exported `programs`
+  showed (2 items — "General English", "IELTS" — against a real site
+  listing many more). Root cause: `agents/researcher.ts::mergeEvidence`
+  merged evidence from multiple sources (the primary web-search call and
+  the supplementary official-site scrape) by having the higher-confidence
+  source's field value overwrite the lower-confidence one's — correct for
+  a scalar fact (phone, address: only one can be true), but wrong for a
+  LIST fact like `programs`/`specializations`: each source had separately
+  found real, distinct items, and the overwrite silently discarded
+  whichever source lost. Fixed by unioning (case-insensitively deduped,
+  not simply concatenated) list fields across all evidence instead of
+  letting one replace another; scalar fields keep the original
+  highest-confidence-wins behavior. The research prompt
+  (`services/llm-client.ts::researchInstitutionViaWebSearch`) was also
+  strengthened to explicitly ask for a COMPLETE program/specialization
+  list (checking a site's dedicated courses/subjects page, not just its
+  homepage) rather than the one or two most prominent items.
 
 ## Cost optimization notes
 

@@ -324,7 +324,22 @@ export async function researchLive(
 }
 
 /** Merge all evidence for a research record into one RawExtractedFields, preferring
- * higher-confidence, more-recently-appended evidence for each field. */
+ * higher-confidence, more-recently-appended evidence for each SCALAR field,
+ * and UNIONING list fields (programs, specializations, languages, shifts)
+ * across every source instead of letting one source's list clobber another's.
+ *
+ * Real production bug: a "look up by name" run for "Registon o'quv markazi"
+ * came back with only 2 programs ("General English", "IELTS") even though
+ * the real institution's own site lists many more subjects/directions — the
+ * primary web-search evidence item and the supplementary site-scrape
+ * evidence item each separately found real, distinct program lists, but the
+ * old scalar-overwrite logic let whichever item happened to have the higher
+ * confidence completely replace the other's array instead of combining them,
+ * silently discarding real facts the lower-confidence source had actually
+ * found. Order/dedup is stable: list items are combined in confidence order
+ * (ascending) and de-duplicated case-insensitively so the same program named
+ * slightly differently by two sources doesn't produce a doubled entry, while
+ * genuinely different items from either source are kept. */
 export function mergeEvidence(record: ResearchRecord): { fields: RawExtractedFields; evidenceCount: number; bestSourceConfidence: number } {
   const merged: RawExtractedFields = {};
   let bestSourceConfidence = 0;
@@ -334,7 +349,22 @@ export function mergeEvidence(record: ResearchRecord): { fields: RawExtractedFie
     bestSourceConfidence = Math.max(bestSourceConfidence, item.confidence);
     for (const [key, value] of Object.entries(item.extractedFields)) {
       if (value === undefined || value === null) continue;
-      if (Array.isArray(value) && value.length === 0) continue;
+      if (Array.isArray(value)) {
+        if (value.length === 0) continue;
+        const existing = (merged as Record<string, unknown>)[key];
+        if (Array.isArray(existing)) {
+          const seen = new Map<string, string>(); // lowercased -> original casing kept
+          for (const v of [...existing, ...value]) {
+            if (typeof v !== "string") continue;
+            const norm = v.trim().toLowerCase();
+            if (norm && !seen.has(norm)) seen.set(norm, v.trim());
+          }
+          (merged as Record<string, unknown>)[key] = [...seen.values()];
+        } else {
+          (merged as Record<string, unknown>)[key] = [...value];
+        }
+        continue;
+      }
       (merged as Record<string, unknown>)[key] = value;
     }
   }

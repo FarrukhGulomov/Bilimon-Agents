@@ -60,7 +60,7 @@ import { discoverMock, mapSearchResultToCandidate, mapKursi24ListingToCandidate 
 import { parseKursi24DetailPage, inferCategoriesFromLabels, inferTypesFromLabels } from "../src/services/kursi24.js";
 import { buildScopeInstruction } from "../src/services/search.js";
 import { assessContentMaterial } from "../src/agents/content-manager.js";
-import { classifySourceUrl, normalizeResearchFields, scoreEvidenceItems } from "../src/agents/researcher.js";
+import { classifySourceUrl, normalizeResearchFields, scoreEvidenceItems, mergeEvidence } from "../src/agents/researcher.js";
 import {
   computeDataCompleteness,
   computeEvidenceConfidence,
@@ -1663,6 +1663,45 @@ console.log("27. \"Look up by name\" mode no longer leaves descriptions null jus
   } as any;
   const material = assessContentMaterial(registonFields);
   assert(material.sufficient === true, `real Registon-shaped evidence, once type/categories are inferred, is enough material to write content (reason: ${material.reason})`);
+}
+
+console.log("28. mergeEvidence unions list fields across sources instead of letting one source's list clobber another's (src/agents/researcher.ts::mergeEvidence)");
+{
+  // Real production bug: a "look up by name" run for "Registon o'quv
+  // markazi" came back with only 2 programs even though the primary
+  // web-search evidence and the supplementary official-site scrape each
+  // separately found real, distinct program lists — the old logic let
+  // whichever evidence item had the higher confidence completely replace
+  // the other's array, discarding real facts the lower-confidence source
+  // had actually found.
+  const record = {
+    id: "test-registon-union",
+    nameKey: "registon oquv markazi",
+    evidence: [
+      {
+        fetchedAt: "2026-01-01T00:00:00.000Z",
+        sourceUrl: "https://rgn.uz",
+        sourceType: "website",
+        confidence: 0.9,
+        extractedFields: { programs: ["Matematika", "Fizika", "IELTS"], specializations: ["SAT tayyorlov"] },
+      },
+      {
+        fetchedAt: "2026-01-01T00:00:01.000Z",
+        sourceUrl: "research://web-search/registon",
+        sourceType: "search",
+        confidence: 0.5,
+        extractedFields: { programs: ["General English", "IELTS"], specializations: ["Ingliz tili o'qitish"] },
+      },
+    ],
+  } as any;
+  const { fields } = mergeEvidence(record);
+  assert(Array.isArray(fields.programs), "merged programs is an array");
+  assert(fields.programs!.length === 4, `programs from BOTH sources are combined, not clobbered (got ${JSON.stringify(fields.programs)})`);
+  for (const expected of ["Matematika", "Fizika", "IELTS", "General English"]) {
+    assert(fields.programs!.some((p) => p.toLowerCase() === expected.toLowerCase()), `combined programs includes "${expected}" (got ${JSON.stringify(fields.programs)})`);
+  }
+  assert(fields.programs!.filter((p) => p.toLowerCase() === "ielts").length === 1, "a program named identically by both sources is de-duplicated, not doubled");
+  assert(fields.specializations!.length === 2, `specializations from both sources are combined (got ${JSON.stringify(fields.specializations)})`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
