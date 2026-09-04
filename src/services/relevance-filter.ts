@@ -16,6 +16,15 @@
  * instructions alone are not enough; this is the deterministic check that
  * can't be silently skipped.
  *
+ * Also catches non-institution entities more broadly: "look up by name"
+ * mode (RunOptions.institutionName) was tested with "Registon" — the
+ * Registan, a famous Samarkand historical monument/tourist landmark, not a
+ * learning center — and the per-institution research call (which never
+ * verifies the named entity is actually a currently-operating education
+ * institution) happily researched and exported it as one. Same lesson:
+ * a keyword-based deterministic check catches what a research prompt alone
+ * did not.
+ *
  * Pure and exported for offline testing — never calls an LLM.
  */
 import type { RawExtractedFields } from "../types/index.js";
@@ -47,6 +56,24 @@ const MEDICAL_KEYWORDS = [
   // describing itself in those terms is implausible.
   "tibbiyot markazi", "tibbiy markaz", "медицинский центр",
   "eeg", "ээг", "электроэнцефалография", "elektroensefalografiya",
+];
+
+// Real production failure: "look up by name" mode (RunOptions.institutionName)
+// was given "Registon" — the Registan, a famous Samarkand historical
+// monument/tourist landmark, not a learning center at all — and the
+// per-institution research call (which never verifies the named entity is
+// actually a currently-operating education institution) happily researched
+// and exported it as one. Deliberately narrow to strong, low-ambiguity
+// heritage/monument/museum signals — a real institution's curriculum might
+// mention history topics, but these specific phrases describe the SUBJECT
+// being a historical site/monument itself, not a business teaching about one.
+const LANDMARK_KEYWORDS = [
+  "jahon merosi", "world heritage", "всемирного наследия",
+  "yunesko", "unesco", "юнеско",
+  "tarixiy yodgorlik", "tarixiy obida", "исторический памятник", "архитектурный памятник",
+  "yodgorlik majmuasi", "arxitektura yodgorligi",
+  "muzey-qo'riqxona", "музей-заповедник",
+  "me'moriy ansambl", "архитектурный ансамбль",
 ];
 
 function textIncludesAny(text: string, keywords: string[]): string | null {
@@ -82,9 +109,13 @@ export function detectNonEducationalOrg(
   ].filter((v): v is string => typeof v === "string" && v.length > 0);
 
   for (const text of haystacks) {
-    const hit = textIncludesAny(text, MEDICAL_KEYWORDS);
-    if (hit) {
-      return `looks like a medical/healthcare organization, not a learning center (matched "${hit}" in "${text.slice(0, 80)}${text.length > 80 ? "..." : ""}") — MVP scope is learning centers only`;
+    const medicalHit = textIncludesAny(text, MEDICAL_KEYWORDS);
+    if (medicalHit) {
+      return `looks like a medical/healthcare organization, not a learning center (matched "${medicalHit}" in "${text.slice(0, 80)}${text.length > 80 ? "..." : ""}") — MVP scope is learning centers only`;
+    }
+    const landmarkHit = textIncludesAny(text, LANDMARK_KEYWORDS);
+    if (landmarkHit) {
+      return `looks like a historical monument/museum/landmark, not a currently-operating learning center (matched "${landmarkHit}" in "${text.slice(0, 80)}${text.length > 80 ? "..." : ""}") — MVP scope is learning centers only`;
     }
   }
   return null;

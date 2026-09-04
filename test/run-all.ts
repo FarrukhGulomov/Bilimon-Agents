@@ -1580,5 +1580,54 @@ console.log("25. \"Look up by name\" mode bypasses discovery entirely and proces
   }
 }
 
+console.log("26. \"Look up by name\" mode no longer fabricates a listing for a non-institution entity (src/services/relevance-filter.ts, src/services/llm-client.ts, src/agents/researcher.ts)");
+{
+  // Real production bug: the user tested "look up by name" mode with
+  // "Registon" — the Registan, a famous Samarkand historical monument, not
+  // a learning center — and the per-institution research call happily
+  // researched and exported it as one, since nothing verified the named
+  // entity actually IS a currently-operating education institution.
+  const landmarkFields = {
+    nameUz: "Registon majmuasi",
+    achievements: "Jahon merosi ro'yxatiga kiritilgan tarixiy yodgorlik",
+  } as any;
+  const reason = detectNonEducationalOrg(landmarkFields);
+  assert(reason !== null, "a historical monument/landmark's fields are flagged as non-educational");
+  assert(reason!.includes("monument"), `the reason names it a monument/landmark, not a generic rejection (got "${reason}")`);
+
+  const landmarkBuilt = buildExportRecord(
+    "idlandmark", "slug", "namekey", landmarkFields,
+    { descriptionUz: "tavsif", descriptionRu: "описание", needsContentReview: false }
+  );
+  assert(landmarkBuilt.record === null, "buildExportRecord refuses to build a record for the landmark (routes to NEEDS_REVIEW, not silently exported)");
+
+  // False-positive guard: a real education institution's curriculum
+  // mentioning history topics in passing must not be flagged just because
+  // it discusses history — only strong, unambiguous heritage-SITE phrases
+  // (describing the subject itself as a monument/museum) trigger this.
+  const legitHistoryCenter = {
+    nameUz: "Tarix va Til Markazi",
+    programs: ["Jahon tarixi", "O'zbekiston tarixi", "Ingliz tili"],
+  } as any;
+  assert(detectNonEducationalOrg(legitHistoryCenter) === null, "a legitimate history-tutoring center is NOT flagged just for teaching history");
+
+  // End-to-end: "look up by name" mode with the exact real-world failing
+  // name must not fabricate an APPROVED listing.
+  const rawName = "Registon";
+  const id = generateId(normalizeNameKey(rawName), "");
+  const cleanupPaths = [
+    join(DATA_STATE_DIR, `${id}.json`),
+    join(DATA_PROCESSED_DIR, `${id}.json`),
+    join(DATA_REVIEW_DIR, `${id}.json`),
+  ];
+  for (const p of cleanupPaths) if (existsSync(p)) unlinkSync(p);
+  try {
+    const summary = await runPipeline({ count: 5, mock: true, institutionName: rawName });
+    assert(summary.approved === 0, `looking up "Registon" by name never results in an approved learning-center listing (approved=${summary.approved})`);
+  } finally {
+    for (const p of cleanupPaths) if (existsSync(p)) unlinkSync(p);
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
