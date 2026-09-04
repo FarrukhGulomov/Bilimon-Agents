@@ -13,6 +13,7 @@ const SCHEMA_DESCRIPTION = `{
   "city": string|null, "address": string|null,
   "foundedYear": number|null, "studentCount": number|null, "teacherCount": number|null,
   "programs": string[], "specializations": string[], "achievements": string|null,
+  "deliveryMode": "OFFLINE"|"ONLINE"|"HYBRID"|null,
   "descriptionSourceText": string|null
 }`;
 

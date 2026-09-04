@@ -232,6 +232,21 @@ export function normalizeResearchFields(raw: Record<string, unknown> | null | un
     const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
     if (Number.isFinite(n) && n > 0) out[key] = Math.round(n);
   }
+  // Real production bug: `deliveryMode` is a REQUIRED_FOR_COMPLETENESS field
+  // (services/scoring.ts) but nothing in real-mode research ever asked for
+  // or set it, so EVERY real-mode institution was missing 1 of 7 required
+  // fields — systematically under-scoring dataCompleteness (and therefore
+  // qualityScore) for every real institution, discovered via a real run for
+  // "Registon o'quv markazi" that had rich, accurate data (phone, website,
+  // 5 programs, bilingual descriptions) yet still landed at qualityScore 74
+  // / NEEDS_REVIEW instead of APPROVED. Only accept one of the three real
+  // enum values (case-insensitive, in case the model doesn't match casing
+  // exactly) — never trust an arbitrary string here.
+  const deliveryMode = raw.deliveryMode;
+  if (typeof deliveryMode === "string") {
+    const upper = deliveryMode.trim().toUpperCase();
+    if (upper === "OFFLINE" || upper === "ONLINE" || upper === "HYBRID") out.deliveryMode = upper;
+  }
   return out as Partial<RawExtractedFields>;
 }
 

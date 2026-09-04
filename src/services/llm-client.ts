@@ -451,6 +451,7 @@ const INSTITUTION_RESEARCH_SCHEMA = `{
     "languages": string[], "programs": string[], "shifts": string[], "specializations": string[],
     "achievements": string|null,
     "pricingNote": string|null,
+    "deliveryMode": "OFFLINE"|"ONLINE"|"HYBRID"|null,
     "descriptionSourceText": string|null
   },
   "sourceUrls": string[]
@@ -524,9 +525,12 @@ export async function researchInstitutionViaWebSearch(
     "\"Matematika\") — never a search-result headline about the institution: reject anything that " +
     "repeats the institution's own name, names a city/region/country, describes the business itself " +
     "(\"... o'quv markazi\", \"... filiallar\"), or is a superlative claim (\"eng yaxshi ...\"). Put " +
-    "price info in `pricingNote` verbatim, never converted/estimated. `descriptionSourceText`: 2-5 " +
-    "factual sentences drawn from the sources — the most important field for the next stage, so fill " +
-    "it whenever you found any real description.\n\n" +
+    "price info in `pricingNote` verbatim, never converted/estimated. Set `deliveryMode` to \"OFFLINE\" " +
+    "if it teaches in person, \"ONLINE\" if only over the internet, \"HYBRID\" if both are offered — " +
+    "most Uzbekistan institutions are in-person (\"OFFLINE\"), so only pick \"ONLINE\"/\"HYBRID\" when " +
+    "the sources actually say so; leave it null rather than guessing if genuinely unclear. " +
+    "`descriptionSourceText`: 2-5 factual sentences drawn from the sources — the most important field " +
+    "for the next stage, so fill it whenever you found any real description.\n\n" +
     "HARD RULE: a field you did not actually find is null/empty, never invented or guessed, and never " +
     "borrowed from a different institution with a similar name. `sourceUrls` lists only URLs you " +
     "actually opened.";

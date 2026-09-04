@@ -779,6 +779,42 @@ remember what was typed at the CLI.
   comes back empty after this, that's the next thing to report back with
   the exact result shown, since it would mean the issue is something other
   than prompt length/density.
+- Eighth follow-up: the seventh follow-up's fix worked — "Registon" was
+  found again, with real phone/website/telegram/description/5 programs —
+  but it still landed at `qualityScore` 74 / NEEDS_REVIEW instead of
+  APPROVED, despite the record passing schema/enum validation cleanly
+  (independently confirmed offline by running the user's exact exported
+  JSON through `validateRecord()`). Root cause, found by reading
+  `services/scoring.ts`: `deliveryMode` is one of the 7
+  `REQUIRED_FOR_COMPLETENESS` fields `computeDataCompleteness` checks, but
+  nothing in real-mode research (`services/llm-client.ts`'s research
+  schema, `services/extractor.ts`'s scrape-extraction schema) ever asked
+  for or set it — `bilimon-exporter.ts` only ever defaults it to
+  `"OFFLINE"` when building the FINAL exported record, which happens
+  AFTER scoring already ran on the un-defaulted `fields`. So every
+  real-mode institution, no matter how good its actual data, was scored as
+  permanently missing 1 of 7 required fields. Verified offline: the exact
+  Registon-shaped fields score 84/100 completeness without `deliveryMode`
+  and 96/100 with it — enough to plausibly be the difference between
+  NEEDS_REVIEW/APPROVED_WITH_WARNINGS and APPROVED_WITH_WARNINGS/APPROVED
+  for real institutions generally, though it may not be the sole
+  explanation for this exact reported case (Railway's deploy needs to
+  actually be running the very latest merged commit for any of this
+  series' fixes to take effect — worth double-checking deploy timing
+  when retesting). Fixed three ways: (1) both research schemas
+  (`llm-client.ts`, `extractor.ts`) now ask for `deliveryMode` as a real,
+  evidence-based fact (`OFFLINE`/`ONLINE`/`HYBRID`) rather than never
+  asking at all; (2) `agents/researcher.ts::normalizeResearchFields`
+  validates it against the three real enum values, case-insensitively,
+  never trusting an arbitrary model string; (3) `agents/orchestrator.ts`
+  applies the SAME `"OFFLINE"` default `bilimon-exporter.ts` already used
+  — but now BEFORE scoring runs, not after, so a real institution's
+  completeness reflects its real data instead of being capped by a field
+  nothing ever populated. Real Uzbekistan institutions being
+  overwhelmingly in-person (`validator.ts` already notes ONLINE has zero
+  occurrences in the real reference export) makes this default a safe
+  assumption, not a fabricated fact — the same one already accepted at
+  export time.
 
 ## Cost optimization notes
 
