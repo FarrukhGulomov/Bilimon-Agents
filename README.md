@@ -735,6 +735,27 @@ remember what was typed at the CLI.
   a guarantee: a site whose nav uses a completely different word for its
   courses page, or renders its nav via JavaScript rather than plain HTML
   `<a>` tags, won't be discovered this way.
+- Sixth follow-up, per the user's explicit ask: the deterministic
+  discovery above should look at the HEADER navigation buttons a human
+  would actually click, not treat an incidental in-body mention of a
+  keyword the same as a real top-nav menu item. `findCoursePageLinks` now
+  scopes its match to `<header>`/`<nav>` regions first via the new
+  `extractHeaderNavHtml`, and only falls back to scanning the whole page
+  when no `<header>`/`<nav>` region matched (either the site doesn't use
+  those tags, or its real nav genuinely doesn't have a match) — so a
+  courses link actually in the header wins over, say, a blog post that
+  happens to mention "kurs narxlari" ("course prices") in passing. The
+  user's related ask — that the agent should recognize a courses-page
+  button even under a name outside the fixed keyword list, by actually
+  reading/understanding the label — is a semantic judgment call, which is
+  exactly what an LLM (not a keyword regex) is suited for: the research
+  prompt (`services/llm-client.ts::researchInstitutionViaWebSearch`) now
+  explicitly asks the model to look at the site's own header/top nav and
+  use its own judgment on the actual label it sees, whatever the phrasing
+  or language, rather than only matching a fixed keyword list. The
+  deterministic `findCoursePageLinks` backstop still only recognizes
+  known-keyword labels — a genuinely unfamiliar term is real-mode LLM
+  judgment's job, not this heuristic's.
 
 ## Cost optimization notes
 

@@ -522,12 +522,17 @@ export async function researchInstitutionViaWebSearch(
     "courses it actually offers, its specializations, teaching languages, class shifts, founding " +
     "year, student and teacher counts, and any achievements/accreditations it genuinely claims. " +
     "`programs` and `specializations` must be as COMPLETE as the sources actually allow, not just " +
-    "the one or two the homepage happens to headline — if the official site has a dedicated courses/" +
-    "subjects page (often linked as \"Kurslar\", \"Yo'nalishlar\", \"Fanlar\", \"Курсы\", \"Направления\", " +
-    "or similar in the site's own menu), open it and list every subject/course/direction it names, " +
-    "not just the first few. A real center commonly teaches many subjects at once (e.g. multiple " +
-    "languages, school subjects, exam prep, IT); report all of them if the sources show them, and " +
-    "only report fewer when the sources genuinely only describe fewer.\n\n" +
+    "the one or two the homepage happens to headline. Specifically: look at the official site's own " +
+    "HEADER/top navigation menu — the row of buttons/links a human visitor would click, not just body " +
+    "text — and judge which item leads to a courses/subjects listing. Usually it's labeled something " +
+    "like \"Kurslar\", \"Yo'nalishlar\", \"Fanlar\", \"Курсы\", \"Направления\", \"Courses\", or " +
+    "\"Programs\", but use your own judgment on the actual label you see, even if it's phrased " +
+    "differently or in a language/term not listed here — you are reading real text and can tell a " +
+    "\"see our courses\" button from a \"contact us\" or \"about us\" one regardless of exact wording. " +
+    "Open whichever nav item is actually the courses/subjects page and list every subject/course/" +
+    "direction it names, not just the first few. A real center commonly teaches many subjects at once " +
+    "(e.g. multiple languages, school subjects, exam prep, IT); report all of them if the sources show " +
+    "them, and only report fewer when the sources genuinely only describe fewer.\n\n" +
     "CRITICAL — `programs`/`specializations` must be the ACTUAL course/subject NAMES as titled on the " +
     "institution's own courses page or materials (e.g. \"General English\", \"IELTS\", \"CEFR (ingliz " +
     "tili)\", \"Abituriyent fanlar\", \"Matematika\") — NEVER a search-engine RESULT TITLE or article " +

@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { slugify, normalizePhone, generateId, generateDuplicateBookkeepingId, generateBilimonRecordId, normalizeNameKey, normalizeLanguages, normalizeLanguageCode } from "../src/services/normalizer.js";
 import { resolveCity } from "../src/services/location-mapper.js";
-import { findCoursePageLinks } from "../src/services/link-discovery.js";
+import { findCoursePageLinks, extractHeaderNavHtml } from "../src/services/link-discovery.js";
 import { deterministicDedupe } from "../src/services/deduplicator.js";
 import { validateRecord, validateBatch } from "../src/services/validator.js";
 import {
@@ -1772,6 +1772,39 @@ console.log("30. findCoursePageLinks discovers a courses/subjects nav link from 
 
   assert(findCoursePageLinks("", "https://example.uz/").length === 0, "empty HTML yields no links rather than throwing");
   assert(findCoursePageLinks("<a href=\"javascript:void(0)\">Kurslar</a>", "https://example.uz/").length === 0, "a javascript: pseudo-link is never followed even if its text matches");
+
+  // Follow-up to the user's explicit ask: look at the HEADER navigation
+  // buttons specifically, not just any link on the page — a body paragraph
+  // that happens to mention "kurs" in passing is a much weaker signal than
+  // a real top-nav menu item.
+  const pageWithHeaderAndBody = `
+    <html><body>
+      <header>
+        <a href="/kurslar/">Kurslar</a>
+        <a href="/about">Biz haqimizda</a>
+      </header>
+      <main>
+        <p>Bizning <a href="/blog/kurs-narxlari-2026">kurs narxlari</a> haqida maqola.</p>
+      </main>
+    </body></html>`;
+  const headerNavHtml = extractHeaderNavHtml(pageWithHeaderAndBody);
+  assert(headerNavHtml.includes("Kurslar"), "extractHeaderNavHtml pulls out the <header> region's content");
+  const scopedLinks = findCoursePageLinks(pageWithHeaderAndBody, "https://rgn.uz/");
+  assert(
+    JSON.stringify(scopedLinks) === JSON.stringify(["https://rgn.uz/kurslar/"]),
+    `when the header nav has a real match, an incidental in-body mention is ignored (got ${JSON.stringify(scopedLinks)})`
+  );
+
+  // When neither <header> nor <nav> matches (or exists), fall back to
+  // scanning the whole page rather than giving up — some real sites don't
+  // use semantic header/nav tags at all.
+  const noHeaderPage = `<html><body><div class="topmenu"><a href="/kurslar/">Kurslar</a></div></body></html>`;
+  assert(extractHeaderNavHtml(noHeaderPage) === "", "a page with no <header>/<nav> tags extracts an empty header/nav region");
+  const fallbackLinks = findCoursePageLinks(noHeaderPage, "https://rgn.uz/");
+  assert(
+    fallbackLinks.includes("https://rgn.uz/kurslar/"),
+    `with no <header>/<nav> region at all, the whole-page fallback still finds the link (got ${JSON.stringify(fallbackLinks)})`
+  );
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
