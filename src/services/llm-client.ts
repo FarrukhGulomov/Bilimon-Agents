@@ -486,76 +486,50 @@ export async function researchInstitutionViaWebSearch(
     `common word, and only a name-plus-business-word search surfaces them.\n` +
     `Research this ONE institution and report only what you actually find.`;
 
+  // Kept deliberately tight: an earlier version of this prompt grew across
+  // several follow-up fixes into ~15 dense paragraphs stacking "IMPORTANT"/
+  // "CRITICAL"/"HARD RULE" warnings on top of each other, and a real run
+  // for "Registon" that had previously succeeded (finding "Registon LC")
+  // came back completely empty again — the most likely cause is the model
+  // defaulting to the safest/most conservative answer (isEducationInstitution:
+  // false/null, nothing else filled in) once instructions become long and
+  // repetitive enough to dilute which rule actually matters most. Every
+  // substantive rule from that version is kept below, just said ONCE, in
+  // priority order, instead of being restated three different ways.
   const instructions =
     "You are a deep-research agent preparing a marketplace listing for ONE named education " +
-    "institution in Uzbekistan. FIRST verify the named entity actually IS a real, " +
-    "currently-operating education/learning institution (a language center, tutoring service, " +
-    "course center, or exam-prep center) — not a historical monument, museum, mosque, government " +
-    "office, company, product, public figure, or anything else that merely shares or resembles the " +
-    "name.\n\n" +
-    "IMPORTANT — name collisions are common and expected: a bare name (e.g. \"Registon\") is often " +
-    "shared between an unrelated famous place/word and a genuine education business that added a " +
-    "business word to it (e.g. \"Registon LC\", \"Registon o'quv markazi\", website rgn.uz, listed on " +
-    "Google/Yandex Maps as a business with its own address, phone, and reviews). The single most " +
-    "prominent general search result for the bare name (a landmark, a Wikipedia page) is NOT proof " +
-    "that no business by that name exists — before concluding `isEducationInstitution: false`, you " +
-    "MUST specifically check Google/Yandex Maps business listings, the institution's own website if " +
-    "one is findable, Instagram/Telegram, and kursi24.uz/yellowpages.uz/goldenpages.uz for a business " +
-    "matching the name (see the search-variant suggestions in the query). Only set it to false once " +
-    "those checks turn up nothing, or clearly show every business-like result is actually the same " +
-    "unrelated landmark/place under a different pretext.\n\n" +
-    "Set `isEducationInstitution` to true once a source (official site, social page, maps listing, or " +
-    "directory entry) confirms a currently-operating education business by this name; set it to false " +
-    "if, after the checks above, the sources clearly show only the unrelated entity; set it to null if " +
-    "you genuinely cannot tell. If it is not confirmed true, leave every field in `fields` null/empty " +
-    "and `sourceUrls` empty — do NOT describe the unrelated entity instead, even if it is " +
-    "well-documented and would otherwise make for a rich-looking listing.\n\n" +
-    "Once confirmed, check, in this order: (1) the institution's official website, " +
-    "(2) its Instagram and Telegram pages, (3) kursi24.uz/uz (a directory dedicated to Uzbekistan " +
-    "learning/course centers) and general Uzbekistan business directories yellowpages.uz and " +
-    "goldenpages.uz, all of which carry structured phone/address data that an institution's own site " +
-    "or social page often omits, (4) any other page that genuinely describes this institution. " +
-    "Most real institutions publish in Uzbek or Russian, not English — search in Uzbek and Russian " +
-    "too, and do not skip a source because it is not in English.\n\n" +
-    "Extract the facts that make this institution sellable to a student: contact details " +
-    "(phone, second phone, email, website, telegram, instagram), address and city, the programs/" +
-    "courses it actually offers, its specializations, teaching languages, class shifts, founding " +
-    "year, student and teacher counts, and any achievements/accreditations it genuinely claims. " +
-    "`programs` and `specializations` must be as COMPLETE as the sources actually allow, not just " +
-    "the one or two the homepage happens to headline. Specifically: look at the official site's own " +
-    "HEADER/top navigation menu — the row of buttons/links a human visitor would click, not just body " +
-    "text — and judge which item leads to a courses/subjects listing. Usually it's labeled something " +
-    "like \"Kurslar\", \"Yo'nalishlar\", \"Fanlar\", \"Курсы\", \"Направления\", \"Courses\", or " +
-    "\"Programs\", but use your own judgment on the actual label you see, even if it's phrased " +
-    "differently or in a language/term not listed here — you are reading real text and can tell a " +
-    "\"see our courses\" button from a \"contact us\" or \"about us\" one regardless of exact wording. " +
-    "Open whichever nav item is actually the courses/subjects page and list every subject/course/" +
-    "direction it names, not just the first few. A real center commonly teaches many subjects at once " +
-    "(e.g. multiple languages, school subjects, exam prep, IT); report all of them if the sources show " +
-    "them, and only report fewer when the sources genuinely only describe fewer.\n\n" +
-    "CRITICAL — `programs`/`specializations` must be the ACTUAL course/subject NAMES as titled on the " +
-    "institution's own courses page or materials (e.g. \"General English\", \"IELTS\", \"CEFR (ingliz " +
-    "tili)\", \"Abituriyent fanlar\", \"Matematika\") — NEVER a search-engine RESULT TITLE or article " +
-    "headline ABOUT the institution. A search result's title is marketing copy about the business, not " +
-    "a course name, even when it contains real words like a subject or city. Concretely, never include " +
-    "an item that: (a) repeats the institution's own name, (b) names a city, region, or the country " +
-    "(\"Toshkentda ...\", \"Chirchiqda ...\", \"O'zbekistonda ...\", \"... viloyatidagi ...\") — a real " +
-    "course name never mentions where it's taught, (c) describes the business itself rather than a " +
-    "subject (\"... o'quv markazi\", \"... markazlar tarmog'i\", \"... filiallar\"), or (d) is a " +
-    "superlative/ranking claim about the institution (\"eng yaxshi ...\", \"top 10 ...\"). If you are " +
-    "not looking at the institution's own course-listing page/material and cannot name the actual " +
-    "course titles, leave `programs`/`specializations` as whatever narrower list you ARE sure of " +
-    "(even empty) rather than filling them with search-result headlines.\n\n" +
-    "Put any price information you find (e.g. monthly fee ranges) in `pricingNote` as plain text " +
-    "quoting what the source says — do not convert or estimate.\n\n" +
-    "`descriptionSourceText` must be 2-5 factual sentences about this institution in its own terms, " +
-    "drawn from what the sources actually say — this is the raw material the content stage writes " +
-    "from, so it is the most important field: never leave it null when you found any real " +
-    "description of the institution.\n\n" +
-    "HARD RULE: every field you did not actually find must be null (or an empty array). Never " +
-    "invent or guess a phone number, address, founding year, count, program, price, or URL, and " +
-    "never carry over a fact from a DIFFERENT institution with a similar name. `sourceUrls` must " +
-    "list only URLs you actually opened and used.";
+    "institution in Uzbekistan.\n\n" +
+    "STEP 1 — confirm it's a real, currently-operating education business (language center, " +
+    "tutoring/course center, exam-prep center) and not something else that merely shares the name " +
+    "(a monument, museum, government office, company, product, person, etc.). Name collisions are " +
+    "common: a bare name is often shared between an unrelated famous place/word and a genuine " +
+    "business that added a business word to it (e.g. \"Registon\" the Samarkand landmark vs. " +
+    "\"Registon LC\" / \"Registon o'quv markazi\", a real chain with its own website and Maps " +
+    "listings). The single most prominent general result for the bare name is NOT proof no business " +
+    "exists — try the business-oriented search variants in the query and check Google/Yandex Maps, " +
+    "kursi24.uz, yellowpages.uz, and goldenpages.uz for a business by this name before concluding " +
+    "otherwise. Set `isEducationInstitution: true` once any source confirms a real business by this " +
+    "name; `false` only once those checks genuinely turn up nothing; `null` if you can't tell. Not " +
+    "`true` means every `fields` entry stays null/empty and `sourceUrls` stays empty — never describe " +
+    "the unrelated entity instead.\n\n" +
+    "STEP 2 — once confirmed, check the official website, Instagram/Telegram, kursi24.uz, " +
+    "yellowpages.uz/goldenpages.uz, and any other page genuinely about this institution. Most publish " +
+    "in Uzbek or Russian — search and read in those languages too.\n\n" +
+    "STEP 3 — extract contact details (phone, phone2, email, website, telegram, instagram), address/" +
+    "city, founding year, student/teacher counts, achievements, and `programs`/`specializations`. For " +
+    "programs: check the official site's own header/top-nav for a courses/subjects link (commonly " +
+    "\"Kurslar\", \"Yo'nalishlar\", \"Fanlar\", \"Курсы\", \"Направления\", \"Courses\" — but use " +
+    "judgment on whatever label you actually see) and list every subject it names, not just the " +
+    "first few. Each entry must be an ACTUAL course/subject name (\"General English\", \"IELTS\", " +
+    "\"Matematika\") — never a search-result headline about the institution: reject anything that " +
+    "repeats the institution's own name, names a city/region/country, describes the business itself " +
+    "(\"... o'quv markazi\", \"... filiallar\"), or is a superlative claim (\"eng yaxshi ...\"). Put " +
+    "price info in `pricingNote` verbatim, never converted/estimated. `descriptionSourceText`: 2-5 " +
+    "factual sentences drawn from the sources — the most important field for the next stage, so fill " +
+    "it whenever you found any real description.\n\n" +
+    "HARD RULE: a field you did not actually find is null/empty, never invented or guessed, and never " +
+    "borrowed from a different institution with a similar name. `sourceUrls` lists only URLs you " +
+    "actually opened.";
 
   return webSearchStructuredObject<InstitutionResearchResult>(query, instructions, INSTITUTION_RESEARCH_SCHEMA);
 }
