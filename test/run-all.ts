@@ -32,6 +32,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { slugify, normalizePhone, generateId, generateDuplicateBookkeepingId, generateBilimonRecordId, normalizeNameKey, normalizeLanguages, normalizeLanguageCode } from "../src/services/normalizer.js";
 import { resolveCity } from "../src/services/location-mapper.js";
+import { findCoursePageLinks } from "../src/services/link-discovery.js";
 import { deterministicDedupe } from "../src/services/deduplicator.js";
 import { validateRecord, validateBatch } from "../src/services/validator.js";
 import {
@@ -1739,6 +1740,38 @@ console.log("29. normalizeResearchFields drops search-result-headline junk out o
     JSON.stringify(normalized.specializations) === JSON.stringify(["Ingliz tili o'qitish"]),
     `normalizeResearchFields strips the junk from specializations end-to-end (got ${JSON.stringify(normalized.specializations)})`
   );
+}
+
+console.log("30. findCoursePageLinks discovers a courses/subjects nav link from an institution's own homepage (src/services/link-discovery.ts)");
+{
+  // Real production gap: the user asked directly why the pipeline doesn't
+  // open an institution's own site and read its pages — e.g. rgn.uz has a
+  // "Kurslar" nav link to rgn.uz/kurslar/, a page listing every real
+  // course. The supplementary scrape previously only ever visited URLs
+  // already known in advance and never looked at a fetched homepage's OWN
+  // markup for a link like this. This synthetic nav snippet is shaped like
+  // a typical Uzbek institution homepage's menu (not scraped real data).
+  const homepageHtml = `
+    <html><body>
+      <nav>
+        <a href="/">Bosh sahifa</a>
+        <a href="/kurslar/">Kurslar</a>
+        <a href="/about">Biz haqimizda</a>
+        <a href="/contact">Aloqa</a>
+        <a href="https://www.instagram.com/registan_lc">Instagram</a>
+      </nav>
+    </body></html>`;
+  const links = findCoursePageLinks(homepageHtml, "https://rgn.uz/");
+  assert(links.includes("https://rgn.uz/kurslar/"), `the "Kurslar" nav link is discovered and resolved to an absolute URL (got ${JSON.stringify(links)})`);
+  assert(!links.some((l) => l.includes("instagram.com")), "an unrelated social link is not mistaken for a courses page");
+  assert(!links.some((l) => l.includes("/about") || l.includes("/contact")), "unrelated nav links (about/contact) are not matched");
+
+  const russianNav = `<a href="/programmy">Курсы и направления</a>`;
+  const ruLinks = findCoursePageLinks(russianNav, "https://example.uz/");
+  assert(ruLinks.includes("https://example.uz/programmy"), `a Russian-language "Курсы" link is also discovered (got ${JSON.stringify(ruLinks)})`);
+
+  assert(findCoursePageLinks("", "https://example.uz/").length === 0, "empty HTML yields no links rather than throwing");
+  assert(findCoursePageLinks("<a href=\"javascript:void(0)\">Kurslar</a>", "https://example.uz/").length === 0, "a javascript: pseudo-link is never followed even if its text matches");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

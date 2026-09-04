@@ -714,6 +714,27 @@ remember what was typed at the CLI.
   tool actually opens that specific page is a real-mode behavior this
   sandbox cannot verify directly; the user re-testing against the deployed
   pipeline is the only way to confirm it in practice.
+- Fifth follow-up, going beyond the prompt-only answer above: the
+  supplementary HTML scrape (`agents/researcher.ts`, the deterministic
+  fetch-and-extract path that runs alongside the web-search call) only
+  ever visited URLs already known in advance — the homepage itself, or a
+  URL the web-search call happened to cite — and never looked AT a fetched
+  homepage's own markup for a link to a page like rgn.uz's "Kurslar" nav
+  item. Added `services/link-discovery.ts::findCoursePageLinks`: a small,
+  generic (not site-specific, unlike `services/kursi24.ts`) regex-based
+  scan of a fetched page's `<a>` tags for link text/href matching
+  courses-page keywords in Uzbek/Russian/English ("Kurslar", "Yo'nalishlar",
+  "Fanlar", "Курсы", "Направления", "Courses", "Programs"). `researchLive`
+  now runs this against any fetched page that IS the institution's own
+  website and, if it finds a matching link, queues that page for scraping
+  too — bounded (`MAX_DISCOVERED_TARGETS = 2`) so this is "follow one
+  obvious nav link one hop deep", never unbounded crawling of an unknown
+  site. This is a genuine code-level improvement (not just a prompt
+  change) to the exact gap the user asked about directly — but it is still
+  a keyword-matching heuristic against unknown, arbitrary site markup, not
+  a guarantee: a site whose nav uses a completely different word for its
+  courses page, or renders its nav via JavaScript rather than plain HTML
+  `<a>` tags, won't be discovered this way.
 
 ## Cost optimization notes
 
