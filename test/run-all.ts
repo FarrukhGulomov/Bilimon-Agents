@@ -1431,6 +1431,14 @@ console.log("20. Web frontend request validation (src/server.ts::parseRunRequest
   assert(!("error" in blankName) && blankName.institutionName === undefined, "a whitespace-only institutionName normalizes to undefined, falling back to broad-discovery mode");
   const nonStringName = parseRunRequest(JSON.stringify({ institutionName: 42, count: 5 }));
   assert("error" in nonStringName, "a non-string institutionName is rejected");
+
+  // "Faqat kursi24.uz orqali qidirish" checkbox.
+  const kursi24OnlyRequested = parseRunRequest(JSON.stringify({ count: 5, kursi24Only: true }));
+  assert(!("error" in kursi24OnlyRequested) && kursi24OnlyRequested.kursi24Only === true, "kursi24Only:true is passed through");
+  const kursi24OnlyDefault = parseRunRequest(JSON.stringify({ count: 5 }));
+  assert(!("error" in kursi24OnlyDefault) && kursi24OnlyDefault.kursi24Only === false, "kursi24Only defaults to false when omitted");
+  const kursi24OnlyTruthyJunk = parseRunRequest(JSON.stringify({ count: 5, kursi24Only: "yes" }));
+  assert(!("error" in kursi24OnlyTruthyJunk) && kursi24OnlyTruthyJunk.kursi24Only === false, "a non-boolean-true kursi24Only value is treated as false, never truthy-coerced");
 }
 
 console.log("21. Retry-until-target discovery ceiling (src/agents/orchestrator.ts::maxTotalRaw)");

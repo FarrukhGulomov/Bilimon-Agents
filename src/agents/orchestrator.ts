@@ -135,6 +135,13 @@ export interface RunOptions {
    * same research → content → export → quality gate pipeline as every
    * other candidate and returns. */
   institutionName?: string;
+  /** "Faqat kursi24.uz orqali qidirish" — real user request: an explicit,
+   * selectable way to use ONLY the kursi24.uz scraper (services/kursi24.ts)
+   * and never fall back to the LLM-search facet loop, even when the crawl
+   * comes up short of `count`. Default false — the LLM-search facets still
+   * fill any shortfall, unchanged behavior for every existing caller. No
+   * effect in --mock mode (the fixtures have no kursi24 concept). */
+  kursi24Only?: boolean;
 }
 
 /** One row of this run's results for a UI table (src/server.ts's
@@ -626,7 +633,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
           : `Discovery: ${remaining} ta yetarli emas, qo'shimcha qidiruv boshlandi (${round}-urinish)...`
       );
     }
-    const rawCandidates = await runDiscovery(requestCount, opts.mock, scope);
+    const rawCandidates = await runDiscovery(requestCount, opts.mock, scope, opts.kursi24Only);
     const newCandidates = rawCandidates.filter((c) => !seenDiscoveryIds.has(c.discoveryId));
     for (const c of rawCandidates) seenDiscoveryIds.add(c.discoveryId);
     if (!opts.mock) {

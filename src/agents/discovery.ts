@@ -271,14 +271,18 @@ function kursi24CandidateInScope(cand: DiscoveryCandidate, scope: DiscoveryScope
 
 export async function discoverLive(
   count: number,
-  scope: DiscoveryScope = loadDefaultScope()
+  scope: DiscoveryScope = loadDefaultScope(),
+  kursi24Only = false
 ): Promise<DiscoveryCandidate[]> {
   const results: DiscoveryCandidate[] = [];
 
   // kursi24.uz scrape — a separate, additional discovery source (real user
   // request, 2026-09-03): deterministic and free (no LLM call at all), so
   // tried first; only the shortfall is filled by the LLM-search facet loop
-  // below.
+  // below — unless kursi24Only was explicitly selected (real user request:
+  // a way to actually choose this source, not just see it labeled after the
+  // fact), in which case the LLM-search loop never runs at all, even if
+  // the crawl came up short of `count`.
   try {
     const listings = await crawlKursi24(KURSI24_SEED_URLS, count);
     let kursi24Found = 0;
@@ -296,7 +300,7 @@ export async function discoverLive(
     console.warn(`Discovery: kursi24.uz scrape failed — ${(err as Error).message}`);
   }
 
-  if (results.length >= count) return results.slice(0, count);
+  if (kursi24Only || results.length >= count) return results.slice(0, count);
 
   const facets = buildSearchFacets(scope);
   // A brief naming a specific city (e.g. "Toshkentda") is a HARD filter
@@ -364,7 +368,8 @@ export async function discoverLive(
 export async function runDiscovery(
   count: number,
   mock: boolean,
-  scope: DiscoveryScope = loadDefaultScope()
+  scope: DiscoveryScope = loadDefaultScope(),
+  kursi24Only = false
 ): Promise<DiscoveryCandidate[]> {
-  return mock ? discoverMock(count, scope) : discoverLive(count, scope);
+  return mock ? discoverMock(count, scope) : discoverLive(count, scope, kursi24Only);
 }

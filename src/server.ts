@@ -74,7 +74,10 @@ async function readBody(req: IncomingMessage): Promise<string> {
 
 export function parseRunRequest(
   raw: string
-): { brief?: string; count: number; topOnly: boolean; institutionName?: string } | { error: string } {
+): (
+  | { brief?: string; count: number; topOnly: boolean; institutionName?: string; kursi24Only: boolean }
+  | { error: string }
+) {
   let parsed: unknown;
   try {
     parsed = raw ? JSON.parse(raw) : {};
@@ -128,7 +131,12 @@ export function parseRunRequest(
     if (!institutionName) institutionName = undefined;
   }
 
-  return { brief: combinedBrief, count, topOnly, institutionName };
+  // "Faqat kursi24.uz orqali qidirish" — real user request: an explicit,
+  // selectable way to use ONLY the kursi24.uz scraper. See
+  // RunOptions.kursi24Only's doc comment in orchestrator.ts.
+  const kursi24Only = body.kursi24Only === true;
+
+  return { brief: combinedBrief, count, topOnly, institutionName, kursi24Only };
 }
 
 async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
@@ -143,7 +151,7 @@ async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
     sendJson(res, 400, { error: parsedRequest.error });
     return;
   }
-  const { brief, count, topOnly, institutionName } = parsedRequest;
+  const { brief, count, topOnly, institutionName, kursi24Only } = parsedRequest;
 
   const mock = process.env.PIPELINE_MOCK === "1";
   if (!mock && !hasApiKey()) {
@@ -153,7 +161,7 @@ async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
 
   runInProgress = true;
   try {
-    const summary = await runPipeline({ count, mock, brief, topOnly, institutionName });
+    const summary = await runPipeline({ count, mock, brief, topOnly, institutionName, kursi24Only });
     const { report, importPath } = finalizeExport();
     sendJson(res, 200, {
       ok: true,
@@ -169,6 +177,7 @@ async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
         searchExhausted: summary.searchExhausted,
         topOnly,
         institutionName: institutionName ?? null,
+        kursi24Only,
       },
       report,
       results: summary.results,
