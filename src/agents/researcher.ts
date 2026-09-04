@@ -309,44 +309,61 @@ export async function researchLive(
   const now = () => new Date().toISOString();
 
   // --- Source 1 (primary): web-search-grounded research on this institution.
+  // Real production bug: a web-search-grounded call is genuinely
+  // non-deterministic run-to-run (different search results, different
+  // sampling) — repeated real "Registon" lookups swung between finding
+  // rich, accurate data and coming back completely empty ("not confirmed
+  // as an education institution") with NO code or prompt change in
+  // between. A single inconclusive attempt was being treated as final,
+  // discarding a real institution's data because that one call happened to
+  // land badly. Retry a bounded number of times (cheap insurance against
+  // one bad roll) before accepting "not confirmed" as the final answer —
+  // stopping as soon as any attempt actually confirms the institution.
+  const MAX_RESEARCH_ATTEMPTS = 2;
   let citedUrls: string[] = [];
-  try {
-    const research = await researchInstitutionViaWebSearch({
-      name: input.name,
-      city: input.city,
-      knownLinks: [input.website, input.telegram, input.instagram, input.facebook, input.sourceUrl],
-    });
-    // Real production bug: "look up by name" mode was tested with
-    // "Registon" (the Registan, a Samarkand historical monument, not a
-    // learning center) and this call happily returned facts about it — the
-    // schema now asks the model to self-report whether the named entity is
-    // actually a currently-operating education institution
-    // (isEducationInstitution), and anything not explicitly confirmed true
-    // is discarded here rather than merged as if it were real evidence.
-    if (research && research.isEducationInstitution !== true) {
-      console.log(`Research: "${input.name}" not confirmed as an education institution — discarding research fields (isEducationInstitution=${research.isEducationInstitution}).`);
-    } else if (research) {
-      const fields = normalizeResearchFields(research.fields);
-      citedUrls = Array.isArray(research.sourceUrls)
-        ? research.sourceUrls.filter((u): u is string => typeof u === "string" && /^https?:\/\//i.test(u))
-        : [];
-      if (Object.keys(fields).length > 0) {
-        const { sourceUrl, additionalSourceUrls } = selectResearchEvidenceSource(nameKey, citedUrls);
-        unscored.push({
-          fetchedAt: now(),
-          sourceUrl,
-          additionalSourceUrls,
-          sourceType: "search",
-          extractedFields: fields,
-          rawTextExcerpt: fields.descriptionSourceText?.slice(0, 500),
-        });
+  for (let attempt = 1; attempt <= MAX_RESEARCH_ATTEMPTS; attempt++) {
+    try {
+      const research = await researchInstitutionViaWebSearch({
+        name: input.name,
+        city: input.city,
+        knownLinks: [input.website, input.telegram, input.instagram, input.facebook, input.sourceUrl],
+      });
+      // Real production bug: "look up by name" mode was tested with
+      // "Registon" (the Registan, a Samarkand historical monument, not a
+      // learning center) and this call happily returned facts about it — the
+      // schema now asks the model to self-report whether the named entity is
+      // actually a currently-operating education institution
+      // (isEducationInstitution), and anything not explicitly confirmed true
+      // is discarded here rather than merged as if it were real evidence.
+      if (research && research.isEducationInstitution === true) {
+        const fields = normalizeResearchFields(research.fields);
+        citedUrls = Array.isArray(research.sourceUrls)
+          ? research.sourceUrls.filter((u): u is string => typeof u === "string" && /^https?:\/\//i.test(u))
+          : [];
+        if (Object.keys(fields).length > 0) {
+          const { sourceUrl, additionalSourceUrls } = selectResearchEvidenceSource(nameKey, citedUrls);
+          unscored.push({
+            fetchedAt: now(),
+            sourceUrl,
+            additionalSourceUrls,
+            sourceType: "search",
+            extractedFields: fields,
+            rawTextExcerpt: fields.descriptionSourceText?.slice(0, 500),
+          });
+        }
+        break; // confirmed — no need to retry
       }
+      console.log(
+        `Research: "${input.name}" not confirmed as an education institution on attempt ${attempt}/${MAX_RESEARCH_ATTEMPTS} ` +
+          `(isEducationInstitution=${research?.isEducationInstitution ?? "null (no parseable response)"}).`
+      );
+    } catch (err) {
+      // Fatal (401/402) rethrows for the orchestrator to stop the run on;
+      // anything else is one institution's bad luck for this attempt —
+      // logged, and the loop still gets its remaining retries.
+      const info = handleProviderError(err);
+      console.warn(`Research: web-search research failed for "${input.name}" on attempt ${attempt}/${MAX_RESEARCH_ATTEMPTS} — ${info.message}`);
     }
-  } catch (err) {
-    // Fatal (401/402) rethrows for the orchestrator to stop the run on;
-    // anything else is one institution's bad luck, logged and survived.
-    const info = handleProviderError(err);
-    console.warn(`Research: web-search research failed for "${input.name}" — ${info.message}`);
   }
 
   // --- Source 2 (supplementary, best-effort): plain HTML scrape.
