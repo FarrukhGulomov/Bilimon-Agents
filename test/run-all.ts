@@ -60,7 +60,7 @@ import { discoverMock, mapSearchResultToCandidate, mapKursi24ListingToCandidate 
 import { parseKursi24DetailPage, inferCategoriesFromLabels, inferTypesFromLabels } from "../src/services/kursi24.js";
 import { buildScopeInstruction } from "../src/services/search.js";
 import { assessContentMaterial } from "../src/agents/content-manager.js";
-import { classifySourceUrl, normalizeResearchFields, scoreEvidenceItems, mergeEvidence } from "../src/agents/researcher.js";
+import { classifySourceUrl, normalizeResearchFields, scoreEvidenceItems, mergeEvidence, isLikelyRealProgramName } from "../src/agents/researcher.js";
 import {
   computeDataCompleteness,
   computeEvidenceConfidence,
@@ -1702,6 +1702,43 @@ console.log("28. mergeEvidence unions list fields across sources instead of lett
   }
   assert(fields.programs!.filter((p) => p.toLowerCase() === "ielts").length === 1, "a program named identically by both sources is de-duplicated, not doubled");
   assert(fields.specializations!.length === 2, `specializations from both sources are combined (got ${JSON.stringify(fields.specializations)})`);
+}
+
+console.log("29. normalizeResearchFields drops search-result-headline junk out of programs/specializations (src/agents/researcher.ts::isLikelyRealProgramName)");
+{
+  // Real production bug: a real run for "Registon o'quv markazi" returned
+  // `programs` full of actual SEO-style search RESULT TITLES about the
+  // institution, not real course names — these exact strings were observed
+  // in the real exported JSON.
+  const instituteNames = ["Registon o'quv markazi", "Регистон учебный центр"];
+  const junk = [
+    "REGISTON o'quv markazlari tarmog'i (filiallar)",
+    "Farg'ona va Farg'ona viloyatidagi o'quv markazi",
+    "O‘zbekistondagi o‘quv markazi",
+    "O'zbekistonda ingliz tili kurslari",
+    "O'zbekistonda xorijiy tillar kurslari",
+  ];
+  for (const item of junk) {
+    assert(!isLikelyRealProgramName(item, instituteNames), `"${item}" is recognized as search-result junk, not a real course name`);
+  }
+  const real = ["General English", "IELTS", "CEFR (ingliz tili)", "Abituriyent fanlar", "Ingliz tili o'qitish", "IELTS tayyorlov kurslari"];
+  for (const item of real) {
+    assert(isLikelyRealProgramName(item, instituteNames), `"${item}" (a real course/specialization name) is NOT flagged as junk`);
+  }
+
+  const normalized = normalizeResearchFields({
+    nameUz: "Registon o'quv markazi",
+    programs: [...junk, "General English", "IELTS"],
+    specializations: ["REGISTON o'quv markazlari tarmog'i (filiallar)", "Ingliz tili o'qitish"],
+  });
+  assert(
+    JSON.stringify(normalized.programs) === JSON.stringify(["General English", "IELTS"]),
+    `normalizeResearchFields strips the junk from programs end-to-end (got ${JSON.stringify(normalized.programs)})`
+  );
+  assert(
+    JSON.stringify(normalized.specializations) === JSON.stringify(["Ingliz tili o'qitish"]),
+    `normalizeResearchFields strips the junk from specializations end-to-end (got ${JSON.stringify(normalized.specializations)})`
+  );
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -671,6 +671,49 @@ remember what was typed at the CLI.
   strengthened to explicitly ask for a COMPLETE program/specialization
   list (checking a site's dedicated courses/subjects page, not just its
   homepage) rather than the one or two most prominent items.
+- Fourth follow-up: after that fix, the union-merged `programs` were more
+  numerous but also visibly wrong — entries like "REGISTON o'quv
+  markazlari tarmog'i (filiallar)", "Chirchiqda ingliz tili kurslari", and
+  "O'zbekistonda ingliz tili kurslari" alongside real course names like
+  "General English"/"IELTS". These are SEO-style search-RESULT TITLES
+  about the institution (the kind of headline a search engine shows for a
+  page ABOUT the business), not real course names — the model conflated
+  "search results describing the institution" with "courses the
+  institution teaches", confirmed against the real institution's own
+  https://rgn.uz/kurslar/ page, which lists actual course names ("General
+  English", "IELTS", "CEFR (ingliz tili)", "Abituriyent fanlar", ...) with
+  no city/country/business-description phrasing at all. Fixed two ways:
+  (1) the research prompt now gives concrete negative examples of exactly
+  this failure and an explicit rule that a real course name never mentions
+  a city, region, the country, or the institution's own name; (2)
+  `agents/researcher.ts::normalizeResearchFields` gained a deterministic
+  `isLikelyRealProgramName` backstop that drops any `programs`/
+  `specializations` entry repeating the institution's own name or matching
+  known junk-phrase shapes ("o'quv markaz", "filial", "tarmog'i",
+  "shahrida(gi)", "viloyatidagi", "o'zbekiston(da)", "eng yaxshi", "top N
+  ..."), applied regardless of which evidence source produced it. This is
+  a best-effort keyword backstop, not a generic classifier — a
+  city-name-based headline for a city not in this heuristic's pattern list
+  (e.g. one that doesn't say "shahrida"/"viloyatida") could still slip
+  through; the prompt fix is the primary defense for cases the keyword
+  list doesn't anticipate.
+- On "why doesn't it just crawl the site like a human would" (the user's
+  direct question): this pipeline's real-mode research is a web-search-
+  grounded LLM call (`services/llm-client.ts::researchInstitutionViaWebSearch`,
+  OpenAI's hosted `web_search` tool), not a purpose-built crawler for
+  arbitrary institution websites — unlike `services/kursi24.ts`, which can
+  afford to be a precise, hand-written scraper because it targets exactly
+  ONE known site with fixed markup. Writing an equivalent for every
+  institution's own unknown, arbitrarily-structured website (find the
+  right nav link, open it, parse whatever markup that specific site
+  happens to use) is a much larger, per-site-fragile undertaking, and this
+  sandbox has no network access to iterate against real sites while
+  building it. The prompt now explicitly tells the model to look for and
+  open a dedicated courses/subjects page by name (`services/llm-client.ts`,
+  same follow-up as above) — whether the underlying model's web-search
+  tool actually opens that specific page is a real-mode behavior this
+  sandbox cannot verify directly; the user re-testing against the deployed
+  pipeline is the only way to confirm it in practice.
 
 ## Cost optimization notes
 

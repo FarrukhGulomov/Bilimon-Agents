@@ -527,7 +527,20 @@ export async function researchInstitutionViaWebSearch(
     "or similar in the site's own menu), open it and list every subject/course/direction it names, " +
     "not just the first few. A real center commonly teaches many subjects at once (e.g. multiple " +
     "languages, school subjects, exam prep, IT); report all of them if the sources show them, and " +
-    "only report fewer when the sources genuinely only describe fewer. " +
+    "only report fewer when the sources genuinely only describe fewer.\n\n" +
+    "CRITICAL — `programs`/`specializations` must be the ACTUAL course/subject NAMES as titled on the " +
+    "institution's own courses page or materials (e.g. \"General English\", \"IELTS\", \"CEFR (ingliz " +
+    "tili)\", \"Abituriyent fanlar\", \"Matematika\") — NEVER a search-engine RESULT TITLE or article " +
+    "headline ABOUT the institution. A search result's title is marketing copy about the business, not " +
+    "a course name, even when it contains real words like a subject or city. Concretely, never include " +
+    "an item that: (a) repeats the institution's own name, (b) names a city, region, or the country " +
+    "(\"Toshkentda ...\", \"Chirchiqda ...\", \"O'zbekistonda ...\", \"... viloyatidagi ...\") — a real " +
+    "course name never mentions where it's taught, (c) describes the business itself rather than a " +
+    "subject (\"... o'quv markazi\", \"... markazlar tarmog'i\", \"... filiallar\"), or (d) is a " +
+    "superlative/ranking claim about the institution (\"eng yaxshi ...\", \"top 10 ...\"). If you are " +
+    "not looking at the institution's own course-listing page/material and cannot name the actual " +
+    "course titles, leave `programs`/`specializations` as whatever narrower list you ARE sure of " +
+    "(even empty) rather than filling them with search-result headlines.\n\n" +
     "Put any price information you find (e.g. monthly fee ranges) in `pricingNote` as plain text " +
     "quoting what the source says — do not convert or estimate.\n\n" +
     "`descriptionSourceText` must be 2-5 factual sentences about this institution in its own terms, " +
