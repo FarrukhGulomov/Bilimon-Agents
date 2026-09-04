@@ -1807,5 +1807,33 @@ console.log("30. findCoursePageLinks discovers a courses/subjects nav link from 
   );
 }
 
+console.log("31. Real-mode research now sets deliveryMode (previously always missing from the required-completeness gate) (src/agents/researcher.ts::normalizeResearchFields, src/agents/orchestrator.ts)");
+{
+  // Real production bug: `deliveryMode` is one of the 7
+  // REQUIRED_FOR_COMPLETENESS fields (services/scoring.ts), but nothing in
+  // real-mode research ever asked for or set it — every real institution
+  // was scored as missing 1 of 7 required fields regardless of how good
+  // its actual data was. Discovered via a real run for "Registon o'quv
+  // markazi" with rich, accurate data that still landed well below what
+  // its completeness should have been.
+  const normalized = normalizeResearchFields({ nameUz: "X", deliveryMode: "offline" });
+  assert(normalized.deliveryMode === "OFFLINE", `a lowercase "offline" from the model is normalized/uppercased (got "${normalized.deliveryMode}")`);
+  assert(normalizeResearchFields({ deliveryMode: "hybrid" }).deliveryMode === "HYBRID", "HYBRID is accepted");
+  assert(normalizeResearchFields({ deliveryMode: "online" }).deliveryMode === "ONLINE", "ONLINE is accepted");
+  assert(normalizeResearchFields({ deliveryMode: "sometimes" }).deliveryMode === undefined, "an invalid/unrecognized deliveryMode value is dropped, not trusted verbatim");
+  assert(normalizeResearchFields({}).deliveryMode === undefined, "no deliveryMode in the source is left unset, not defaulted here (the default is applied later, in orchestrator.ts, before scoring)");
+
+  const fieldsWithoutDeliveryMode = {
+    nameUz: "Registon o'quv markazi", phone: "+998935842700", city: "Toshkent",
+    address: "Shota Rustaveli ko'chasi 53", type: "COURSE_CENTER", categories: ["IELTS", "LANGUAGES"],
+    email: "info@rgn.uz", website: "https://rgn.uz", telegram: "@Registan_LC",
+    foundedYear: 2014, studentCount: 1300,
+    programs: ["General English", "IELTS"], specializations: ["Ingliz tili o'qitish"],
+  } as any;
+  const before = computeDataCompleteness(fieldsWithoutDeliveryMode);
+  const after = computeDataCompleteness({ ...fieldsWithoutDeliveryMode, deliveryMode: "OFFLINE" });
+  assert(after > before, `dataCompleteness measurably improves once deliveryMode is present (before=${before}, after=${after})`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

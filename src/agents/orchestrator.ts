@@ -467,6 +467,24 @@ export async function runPipeline(opts: RunOptions): Promise<RunSummary> {
         }
       }
 
+      // Real production bug: `deliveryMode` is one of the 7
+      // REQUIRED_FOR_COMPLETENESS fields (services/scoring.ts) that scoring
+      // runs against BEFORE bilimon-exporter.ts's own `?? "OFFLINE"` default
+      // ever applies (that default only affects the exported record, built
+      // after scoring) — so a real institution whose research call left
+      // `deliveryMode` null/undetermined (the normal case; see
+      // llm-client.ts's research prompt) was scored as missing 1 of 7
+      // required fields, systematically capping dataCompleteness/
+      // qualityScore below what the same institution's real data actually
+      // warranted. Apply the SAME default here, before scoring, so an
+      // institution's score reflects its real completeness. Real Uzbekistan
+      // institutions are overwhelmingly in-person (see validator.ts: online
+      // has zero occurrences in the real reference export), so defaulting
+      // to "OFFLINE" when undetermined is a safe assumption, not a guess
+      // presented as a researched fact — it's the same assumption
+      // bilimon-exporter.ts already makes for the exported record.
+      if (!fields.deliveryMode) fields.deliveryMode = "OFFLINE";
+
       // Real production bug: `nameKey`/`slug` above are computed from
       // `cand.rawName` at DISCOVERY time, before research runs — and a live
       // search result's `name` is sometimes just the generic facet label
