@@ -499,6 +499,132 @@ npm run server
   runs would race on the same `data/state`/`data/export` files.
 - The old one-shot CLI batch is still available: `npm run cli -- run --count N [--mock] [--brief "..."]` (built) or `npx tsx src/cli.ts run ...` (dev).
 
+## Market scan: keyword-driven competitor lookup (independent of the education pipeline)
+
+Real user request: type a keyword — e.g. "onlayn kredit" — and get every
+real provider of it (banks, or any other industry the keyword names)
+researched and exported as downloadable JSON and Excel-compatible CSV.
+This is a **separate, independent mode**, not an extension of the
+education-institution pipeline above: this project's core rule is adapting
+agents to BilimOn's REAL schema, never inventing fields onto it, and a
+bank's credit product is not an education institution — forcing it into
+`bilimon-export.zod.ts`'s shape (`nameUz`, `cityId`, `programs`, ...) would
+violate that same rule in the other direction. See `src/types/market-scan.ts`
+for the full reasoning and its own schema (`CompetitorRecord`:
+providerName, productName, category, website, phone, interestRate,
+loanAmountRange, loanTermRange, requirements, description, sourceUrls).
+
+- **Architecture**: reuses the same discovery → research shape as the
+  education pipeline (`services/market-scan-llm.ts`), including the same
+  "self-report whether this is even real, discard everything if not
+  confirmed" pattern (`isRealProvider`, mirroring `isEducationInstitution`)
+  and the same bounded-retry mitigation for web-search non-determinism
+  (`MAX_RESEARCH_ATTEMPTS = 2`) that `agents/researcher.ts::researchLive`
+  uses — both patterns were hard-won fixes from real production failures in
+  the education pipeline (see "Production safety notes" below), so this
+  mode starts with them already in place rather than re-discovering them.
+- **CLI**: `npx tsx src/cli.ts scan --keyword "onlayn kredit" --count 10 [--mock]`.
+  Writes `data/export/market-scan-<slug>.json` and `.csv`.
+- **Web frontend**: a separate card/form on the same page (`public/index.html`)
+  posting to `POST /api/scan` (`{keyword, count}`), rendering into its own
+  status/table/download UI — entirely independent of the education
+  pipeline's form, status area, and download buttons above it.
+- **Excel export**: a real `.xlsx` library (SheetJS's `xlsx` package) was
+  tried and rejected — at install time it carried two unpatched
+  high-severity advisories with no fix available (prototype pollution,
+  ReDoS), both triggered by *parsing* an untrusted file, which this
+  codebase would never do here (only writing). Rather than take on a
+  permanently-vulnerable dependency for a format Excel already opens
+  natively without it, `services/csv-writer.ts` generates a dependency-free
+  CSV (UTF-8 BOM so Excel renders Uzbek/Cyrillic text correctly, proper
+  quote/comma escaping) — "download in Excel format" is satisfied without
+  the risk.
+- **Mock mode**: `data/fixtures/mock-market-scan.json`, keyed by
+  keyword — `onlayn kredit` has real-shaped fixture competitors; any other
+  keyword falls back to a generic `default` entry, so `--mock`/`PIPELINE_MOCK=1`
+  exercises this mode fully offline for any typed keyword, same convention
+  as every other mode in this codebase.
+- **Not exercised by execution in this build environment**: like every
+  other real-mode LLM call in this codebase, `discoverCompetitors`/
+  `researchCompetitor` have no live network/API access to test against
+  here — only the mock path, the CSV writer, field normalization, dedupe,
+  and request validation are actually run and verified (all covered by
+  `test/run-all.ts`). The web UI form/table/download flow WAS verified in
+  a real browser against the running server in `--mock` mode (Playwright,
+  headless Chromium) before this was considered done.
+
+## Listing search: free-text buy queries (cars, real estate, anything else)
+
+Real user request: type a free-text description of what you want to buy —
+e.g. "2023 yil ishlab chiqarilgan onix mt avtomobili oq rangli 53 ming
+yurgan" (a 2023 Chevrolet Onix, manual transmission, white, 53k km) or "3
+xonali kvartira Chilonzorda ipoteka" — and get real, currently-listed
+matching items from real Uzbekistan classifieds sites (OLX.uz, Joymee.uz,
+Uytop.uz, and whatever else a search surfaces), exported as JSON and CSV.
+A third independent mode alongside the education pipeline and market scan —
+see `src/types/listing-search.ts` for its own schema (`ListingFilters`:
+rawQuery/itemType/an open `attributes` bag; `ListingRecord`: title, price,
+location, sourceSite, sourceUrl, attributes, postedDate, description).
+
+- **Deliberately generic**, not car-specific or real-estate-specific:
+  `attributes` is parsed as an open key/value bag from whatever the query
+  actually names (`services/listing-search-llm.ts::parseListingQuery`, an
+  LLM call), not a fixed schema — the same reasoning as market scan's
+  `category` being free text.
+- **Single search call, not discovery+per-item-deep-research**: unlike
+  market scan (which deep-researches each candidate provider separately),
+  a classifieds listing page is normally self-contained — price and
+  attributes are usually all on one page/search snippet — and the user
+  explicitly asked for results "qisqa vaqt ichida" (quickly), so
+  `searchListings` finds and reports matching listings directly in one
+  call rather than fanning out N extra calls per result.
+- **Hard rule enforced in code, not just the prompt**: every listing MUST
+  carry a real `sourceUrl` the model says it opened — `services/
+  listing-search-llm.ts::normalizeListing` drops any result missing one or
+  with an unparseable URL, never trusting a title/price on its own as a
+  verified listing (same "never fabricate" ethos as the rest of this
+  codebase, applied to a different domain).
+- **CLI**: `npx tsx src/cli.ts find --query "<tavsif>" --count N [--mock]`.
+- **Web frontend**: its own independent card/form/results-table/download
+  section in `public/index.html`, posting to `POST /api/find`.
+- **Mock mode**: `data/fixtures/mock-listing-search.json` plus a small
+  deterministic (no-LLM-call) keyword heuristic
+  (`agents/listing-search.ts::guessMockItemType`, mirroring `services/
+  brief-parser.ts`'s heuristic pattern) that classifies a free-text query
+  into a fixture bucket — the user's own example query above is one of the
+  test cases and correctly resolves to the car fixtures.
+
+### Telegram channel/group search — explicitly requested, NOT implemented
+
+The user also asked this mode search Telegram channels/groups. This was
+deliberately left out after clarifying the access model with the user,
+rather than building something that looks wired up but can't actually do
+what was asked:
+
+- **Bot API** (a `123:ABC...` bot token) can only ever see messages in a
+  chat it has been added to, and only messages sent *after* it joined —
+  there is no Bot API method to search the historical content of an
+  arbitrary channel/group, public or not, that the bot wasn't already a
+  member of when a message was posted. It cannot do a keyword search
+  across Telegram the way a web search engine indexes web pages.
+- A **user-session (MTProto) integration** — e.g. via GramJS/Telethon,
+  logged in as a real account — CAN search the full history of any
+  channel/group that account has joined, which is what would actually be
+  needed here. But standing this up requires: a new dependency (no MTProto
+  client is in this codebase today), an interactive login flow (phone
+  number + SMS/2FA code) that cannot be completed inside an agent session
+  like this one, and carries a real risk of the account being rate-limited
+  or banned if used for bulk scraping/searching, which is against
+  Telegram's ToS in many usage patterns.
+- The user confirmed building the web-search part (this section) first and
+  deferring Telegram. If Telegram support is wanted later: decide which
+  channels/groups matter, get a real account willing to join them and
+  generate a session string interactively (outside an agent session), then
+  wire a new `services/telegram-search.ts` into this mode's discovery step
+  as an additional source alongside `searchListings` — the
+  `ListingSearchResult`/`ListingRecord` shape here doesn't need to change
+  for that, only where evidence comes from.
+
 ## Brief-driven discovery: a general-purpose product, not a 4-category tool
 
 Earlier versions of this pipeline scoped discovery to a fixed list —

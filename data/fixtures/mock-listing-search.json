@@ -1,0 +1,43 @@
+{
+  "_comment": "FIXTURE/TEST DATA ONLY — not real scraped/researched data. Keyed by normalized itemType; any itemType/query not matched here falls back to \"default\" so --mock mode is fully exercisable for any typed query. See agents/listing-search.ts.",
+  "byItemType": {
+    "avtomobil": {
+      "listings": [
+        {
+          "title": "Chevrolet Onix, 2023 yil, oq rang, MT",
+          "price": "12 800 $",
+          "location": "Toshkent",
+          "sourceSite": "olx.uz",
+          "sourceUrl": "https://www.olx.uz/d/obyavlenie/chevrolet-onix-2023-oq-mt-ID1a2b3.html",
+          "attributes": { "brand": "Chevrolet", "model": "Onix", "year": "2023", "transmission": "MT", "color": "Oq", "mileage_km": "53000" },
+          "postedDate": "2026-09-10",
+          "description": "2023 yilgi Chevrolet Onix, mexanika, oq rang, 53 ming km yurgan, bitta egasidan."
+        },
+        {
+          "title": "Onix MT 2023 sotiladi",
+          "price": "13 100 $",
+          "location": "Samarqand",
+          "sourceSite": "uytop.uz",
+          "sourceUrl": "https://uytop.uz/avto/onix-mt-2023-c9d8e7",
+          "attributes": { "brand": "Chevrolet", "model": "Onix", "year": "2023", "transmission": "MT" },
+          "postedDate": "2026-09-05",
+          "description": "Yaxshi holatda, servis kitobi bilan, muzokara mavjud."
+        }
+      ]
+    }
+  },
+  "default": {
+    "listings": [
+      {
+        "title": "Namuna e'lon (mock fixture)",
+        "price": null,
+        "location": null,
+        "sourceSite": "example.uz",
+        "sourceUrl": "https://example.uz/listing/1",
+        "attributes": {},
+        "postedDate": null,
+        "description": "Mock fixture rekordi — real ma'lumot emas, faqat --mock rejimini offline sinash uchun."
+      }
+    ]
+  }
+}
