@@ -15,6 +15,7 @@ import { MissingApiKeyError, hasApiKey, isFatalProviderError } from "./services/
 import { listCities } from "./services/location-mapper.js";
 import type { BilimOnExportRecord } from "./types/index.js";
 import { runMarketScan, marketScanToCsv } from "./agents/market-scan.js";
+import { runListingSearch, listingSearchToCsv } from "./agents/listing-search.js";
 
 // Uzbek display labels for the frontend's city dropdown, keyed by the real
 // CitySeed.nameEn (src/schemas/locations.ts) so the dropdown's option value
@@ -57,6 +58,10 @@ let runInProgress = false;
 // the education-pipeline lock above — just its own, so two overlapping
 // scans can't race on the same market-scan-<slug> files.
 let scanInProgress = false;
+// Same reasoning, own lock: the listing-search mode touches only
+// data/export/listing-search-*.json|csv.
+let findInProgress = false;
+const MAX_FIND_COUNT = Number(process.env.PIPELINE_MAX_FIND_COUNT ?? 20);
 
 function sendJson(res: ServerResponse, status: number, body: unknown) {
   const payload = JSON.stringify(body);
@@ -314,6 +319,85 @@ async function handleApiScan(req: IncomingMessage, res: ServerResponse) {
   }
 }
 
+// Free-text listing-search mode — a real user request: describe what to
+// buy in natural language (a car, an apartment, anything else) and get
+// real, currently-listed matching items from real Uzbekistan classifieds
+// sites, exported as JSON+CSV. Independent of parseRunRequest/
+// parseScanRequest — see types/listing-search.ts's doc comment for why.
+export function parseFindRequest(raw: string): { query: string; count: number } | { error: string } {
+  let parsed: unknown;
+  try {
+    parsed = raw ? JSON.parse(raw) : {};
+  } catch {
+    return { error: "Noto'g'ri so'rov formati (JSON kutilgan)." };
+  }
+  const body = (parsed ?? {}) as Record<string, unknown>;
+
+  if (typeof body.query !== "string" || body.query.trim().length === 0) {
+    return { error: "\"query\" bo'sh bo'lmagan matn bo'lishi kerak." };
+  }
+  const query = body.query.trim().slice(0, MAX_BRIEF_LENGTH);
+
+  const rawCount = body.count ?? 10;
+  const count = Number(rawCount);
+  if (!Number.isFinite(count) || !Number.isInteger(count) || count < 1) {
+    return { error: "\"count\" 1 dan katta butun son bo'lishi kerak." };
+  }
+  if (count > MAX_FIND_COUNT) {
+    return { error: `"count" ${MAX_FIND_COUNT} dan oshmasligi kerak.` };
+  }
+
+  return { query, count };
+}
+
+async function handleApiFind(req: IncomingMessage, res: ServerResponse) {
+  if (findInProgress) {
+    sendJson(res, 409, { error: "Boshqa so'rov hozir bajarilmoqda. Biroz kuting va qayta urinib ko'ring." });
+    return;
+  }
+
+  const raw = await readBody(req);
+  const parsedRequest = parseFindRequest(raw);
+  if ("error" in parsedRequest) {
+    sendJson(res, 400, { error: parsedRequest.error });
+    return;
+  }
+  const { query, count } = parsedRequest;
+
+  const mock = process.env.PIPELINE_MOCK === "1";
+  if (!mock && !hasApiKey()) {
+    sendJson(res, 400, { error: new MissingApiKeyError().message });
+    return;
+  }
+
+  findInProgress = true;
+  try {
+    const result = await runListingSearch({ query, count, mock });
+    sendJson(res, 200, {
+      ok: true,
+      query,
+      count: result.listings.length,
+      requested: count,
+      filters: result.filters,
+      listings: result.listings,
+      // Same "embed the full export directly in the response" reasoning as
+      // /api/scan's jsonFile/csvContent — a host with no persistent disk
+      // can lose the on-disk copy between requests.
+      jsonFile: result,
+      csvContent: listingSearchToCsv(result),
+    });
+  } catch (err) {
+    if (isFatalProviderError(err)) {
+      sendJson(res, 200, { ok: false, warning: `So'rov to'xtatildi: ${err.info.message}` });
+      return;
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    sendJson(res, 500, { error: `Ichki xatolik: ${message}` });
+  } finally {
+    findInProgress = false;
+  }
+}
+
 function readImportFile(importPath: string): unknown {
   try {
     return JSON.parse(readFileSync(importPath, "utf-8"));
@@ -373,6 +457,8 @@ const server = createServer((req, res) => {
       await handleApiRun(req, res);
     } else if (req.method === "POST" && url.pathname === "/api/scan") {
       await handleApiScan(req, res);
+    } else if (req.method === "POST" && url.pathname === "/api/find") {
+      await handleApiFind(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/download") {
       handleApiDownload(res);
     } else {

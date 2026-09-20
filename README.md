@@ -553,6 +553,78 @@ loanAmountRange, loanTermRange, requirements, description, sourceUrls).
   a real browser against the running server in `--mock` mode (Playwright,
   headless Chromium) before this was considered done.
 
+## Listing search: free-text buy queries (cars, real estate, anything else)
+
+Real user request: type a free-text description of what you want to buy —
+e.g. "2023 yil ishlab chiqarilgan onix mt avtomobili oq rangli 53 ming
+yurgan" (a 2023 Chevrolet Onix, manual transmission, white, 53k km) or "3
+xonali kvartira Chilonzorda ipoteka" — and get real, currently-listed
+matching items from real Uzbekistan classifieds sites (OLX.uz, Joymee.uz,
+Uytop.uz, and whatever else a search surfaces), exported as JSON and CSV.
+A third independent mode alongside the education pipeline and market scan —
+see `src/types/listing-search.ts` for its own schema (`ListingFilters`:
+rawQuery/itemType/an open `attributes` bag; `ListingRecord`: title, price,
+location, sourceSite, sourceUrl, attributes, postedDate, description).
+
+- **Deliberately generic**, not car-specific or real-estate-specific:
+  `attributes` is parsed as an open key/value bag from whatever the query
+  actually names (`services/listing-search-llm.ts::parseListingQuery`, an
+  LLM call), not a fixed schema — the same reasoning as market scan's
+  `category` being free text.
+- **Single search call, not discovery+per-item-deep-research**: unlike
+  market scan (which deep-researches each candidate provider separately),
+  a classifieds listing page is normally self-contained — price and
+  attributes are usually all on one page/search snippet — and the user
+  explicitly asked for results "qisqa vaqt ichida" (quickly), so
+  `searchListings` finds and reports matching listings directly in one
+  call rather than fanning out N extra calls per result.
+- **Hard rule enforced in code, not just the prompt**: every listing MUST
+  carry a real `sourceUrl` the model says it opened — `services/
+  listing-search-llm.ts::normalizeListing` drops any result missing one or
+  with an unparseable URL, never trusting a title/price on its own as a
+  verified listing (same "never fabricate" ethos as the rest of this
+  codebase, applied to a different domain).
+- **CLI**: `npx tsx src/cli.ts find --query "<tavsif>" --count N [--mock]`.
+- **Web frontend**: its own independent card/form/results-table/download
+  section in `public/index.html`, posting to `POST /api/find`.
+- **Mock mode**: `data/fixtures/mock-listing-search.json` plus a small
+  deterministic (no-LLM-call) keyword heuristic
+  (`agents/listing-search.ts::guessMockItemType`, mirroring `services/
+  brief-parser.ts`'s heuristic pattern) that classifies a free-text query
+  into a fixture bucket — the user's own example query above is one of the
+  test cases and correctly resolves to the car fixtures.
+
+### Telegram channel/group search — explicitly requested, NOT implemented
+
+The user also asked this mode search Telegram channels/groups. This was
+deliberately left out after clarifying the access model with the user,
+rather than building something that looks wired up but can't actually do
+what was asked:
+
+- **Bot API** (a `123:ABC...` bot token) can only ever see messages in a
+  chat it has been added to, and only messages sent *after* it joined —
+  there is no Bot API method to search the historical content of an
+  arbitrary channel/group, public or not, that the bot wasn't already a
+  member of when a message was posted. It cannot do a keyword search
+  across Telegram the way a web search engine indexes web pages.
+- A **user-session (MTProto) integration** — e.g. via GramJS/Telethon,
+  logged in as a real account — CAN search the full history of any
+  channel/group that account has joined, which is what would actually be
+  needed here. But standing this up requires: a new dependency (no MTProto
+  client is in this codebase today), an interactive login flow (phone
+  number + SMS/2FA code) that cannot be completed inside an agent session
+  like this one, and carries a real risk of the account being rate-limited
+  or banned if used for bulk scraping/searching, which is against
+  Telegram's ToS in many usage patterns.
+- The user confirmed building the web-search part (this section) first and
+  deferring Telegram. If Telegram support is wanted later: decide which
+  channels/groups matter, get a real account willing to join them and
+  generate a session string interactively (outside an agent session), then
+  wire a new `services/telegram-search.ts` into this mode's discovery step
+  as an additional source alongside `searchListings` — the
+  `ListingSearchResult`/`ListingRecord` shape here doesn't need to change
+  for that, only where evidence comes from.
+
 ## Brief-driven discovery: a general-purpose product, not a 4-category tool
 
 Earlier versions of this pipeline scoped discovery to a fixed list —

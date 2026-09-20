@@ -11,6 +11,9 @@
  *   pipeline scan --keyword "<so'z>" [--count N] [--mock]
  *     (keyword-driven market/competitor scan — independent of `run`'s
  *     BilimOn education-institution pipeline; see agents/market-scan.ts)
+ *   pipeline find --query "<tavsif>" [--count N] [--mock]
+ *     (free-text listing search, e.g. a car/apartment description —
+ *     independent of `run`/`scan`; see agents/listing-search.ts)
  */
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -20,6 +23,7 @@ import { validateBatch } from "./services/validator.js";
 import type { BilimOnExportRecord } from "./types/index.js";
 import { MissingApiKeyError, hasApiKey, isFatalProviderError } from "./services/llm-client.js";
 import { runMarketScan, writeMarketScanExport } from "./agents/market-scan.js";
+import { runListingSearch, writeListingSearchExport } from "./agents/listing-search.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXPORT_DIR = join(__dirname, "..", "data", "export");
@@ -177,6 +181,34 @@ async function cmdScan(flags: Record<string, string | boolean>) {
   console.log(JSON.stringify(result, null, 2));
 }
 
+// Free-text listing-search mode — a real user request: describe what to
+// buy in natural language (a car, an apartment, anything else) and get
+// real, currently-listed matching items from real Uzbekistan classifieds
+// sites. Independent of both `run` and `scan` — see
+// types/listing-search.ts's doc comment for why.
+async function cmdFind(flags: Record<string, string | boolean>) {
+  const query = typeof flags.query === "string" ? flags.query.trim() : "";
+  const count = Number(flags.count ?? 10);
+  const mock = isMock(flags);
+  if (!query) {
+    console.error('Usage: pipeline find --query "<tavsif>" [--count N] [--mock]');
+    process.exitCode = 1;
+    return;
+  }
+  if (!mock && !hasApiKey()) {
+    console.error(new MissingApiKeyError().message);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`Running listing search: query="${query}" count=${count} mock=${mock}`);
+  const result = await runListingSearch({ query, count, mock });
+  const { jsonPath, csvPath } = writeListingSearchExport(result);
+  console.log(`Found ${result.listings.length} real listing(s) for "${query}".`);
+  console.log(`Wrote ${jsonPath}`);
+  console.log(`Wrote ${csvPath}`);
+  console.log(JSON.stringify(result, null, 2));
+}
+
 function cmdValidate() {
   const importFile = join(EXPORT_DIR, "bilimon-import.json");
   let records: BilimOnExportRecord[] = [];
@@ -223,9 +255,12 @@ async function main() {
       case "scan":
         await cmdScan(flags);
         break;
+      case "find":
+        await cmdFind(flags);
+        break;
       default:
         console.log(
-          'Usage: pipeline <run|validate|export|scan> [--count N] [--mock] [--brief "<free text>"] [--top] [--name "<institution name>"] [--kursi24-only] [--print-import] [--keyword "<so\'z>" (for scan)]'
+          'Usage: pipeline <run|validate|export|scan|find> [--count N] [--mock] [--brief "<free text>"] [--top] [--name "<institution name>"] [--kursi24-only] [--print-import] [--keyword "<so\'z>" (for scan)] [--query "<tavsif>" (for find)]'
         );
         process.exitCode = command ? 1 : 0;
     }
