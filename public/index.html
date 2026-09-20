@@ -68,6 +68,16 @@
     margin-top: 10px;
     background: #7c3aed;
   }
+  #scan-status { margin-top: 12px; font-size: 0.95rem; white-space: pre-wrap; }
+  #scan-status.error { color: #b91c1c; }
+  #scan-status.success { color: #15803d; }
+  #scan-download-json, #scan-download-csv {
+    display: none;
+    margin-top: 10px;
+  }
+  #scan-download-json { background: #15803d; }
+  #scan-download-csv { background: #0f766e; }
+  #scan-results-wrap { display: none; margin-top: 14px; }
   .checkbox-row {
     display: flex;
     align-items: flex-start;
@@ -155,6 +165,42 @@
       <input type="text" id="institution-name" name="institution-name" placeholder="masalan: Najot Ta'lim" maxlength="300" />
       <button type="submit" id="lookup-btn">Shu markazni qidirish</button>
     </form>
+  </div>
+
+  <div class="card" id="scan-card">
+    <h3 style="margin-top:0">Bozor/raqobatchilar tahlili (kalit so'z bo'yicha)</h3>
+    <p class="subtitle" style="margin-top:0">
+      Har qanday soha/mahsulot bo'yicha kalit so'z kiriting (masalan: "onlayn kredit") —
+      barcha haqiqiy provayderlar (banklar va h.k.) qidirib, JSON va Excel (CSV) formatda yuklab olish mumkin.
+      O'quv markazlari bilan bog'liq emas — mustaqil rejim.
+    </p>
+    <form id="scan-form">
+      <label for="scan-keyword">Kalit so'z</label>
+      <input type="text" id="scan-keyword" name="scan-keyword" placeholder="masalan: onlayn kredit" maxlength="300" />
+
+      <label for="scan-count">Nechta provayder</label>
+      <input type="number" id="scan-count" name="scan-count" value="10" min="1" max="20" />
+
+      <button type="submit" id="scan-btn">Tahlilni boshlash</button>
+    </form>
+    <div id="scan-status"></div>
+    <button id="scan-download-json" type="button">JSON yuklab olish</button>
+    <button id="scan-download-csv" type="button">Excel (CSV) yuklab olish</button>
+    <div class="table-scroll" id="scan-results-wrap" style="display:none">
+      <table>
+        <thead>
+          <tr>
+            <th>Provayder</th>
+            <th>Mahsulot</th>
+            <th>Sayt</th>
+            <th>Telefon</th>
+            <th>Foiz stavkasi</th>
+            <th>Muddat</th>
+          </tr>
+        </thead>
+        <tbody id="scan-results-body"></tbody>
+      </table>
+    </div>
   </div>
 
   <div class="card">
@@ -408,6 +454,118 @@
       "Qidirilmoqda...",
       "Shu markazni qidirish"
     );
+  });
+
+  // Keyword-driven market/competitor scan — independent of the education
+  // pipeline above; hits /api/scan and renders into its own status/table/
+  // download UI. Same "download from data already in hand" pattern as
+  // downloadJson() above, plus a plain-text CSV download (Excel opens CSV
+  // natively — see services/csv-writer.ts for why there's no real .xlsx).
+  const scanForm = document.getElementById("scan-form");
+  const scanBtn = document.getElementById("scan-btn");
+  const scanStatusEl = document.getElementById("scan-status");
+  const scanDownloadJsonBtn = document.getElementById("scan-download-json");
+  const scanDownloadCsvBtn = document.getElementById("scan-download-csv");
+  const scanResultsWrap = document.getElementById("scan-results-wrap");
+  const scanResultsBody = document.getElementById("scan-results-body");
+
+  let lastScanJsonFile = null;
+  let lastScanCsvContent = null;
+  let lastScanKeywordSlug = "scan";
+
+  function downloadText(text, filename, mimeType) {
+    const blob = new Blob([text], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function renderScanResults(competitors) {
+    if (!competitors || competitors.length === 0) {
+      scanResultsWrap.style.display = "none";
+      return;
+    }
+    scanResultsBody.innerHTML = competitors.map((c) => {
+      const website = c.website
+        ? `<a href="${escapeHtml(c.website)}" target="_blank" rel="noopener noreferrer">${escapeHtml(c.website)}</a>`
+        : "—";
+      return `<tr>
+        <td class="name-cell">${escapeHtml(c.providerName)}</td>
+        <td>${c.productName ? escapeHtml(c.productName) : "—"}</td>
+        <td>${website}</td>
+        <td>${c.phone ? escapeHtml(c.phone) : "—"}</td>
+        <td>${c.interestRate ? escapeHtml(c.interestRate) : "—"}</td>
+        <td>${c.loanTermRange ? escapeHtml(c.loanTermRange) : "—"}</td>
+      </tr>`;
+    }).join("");
+    scanResultsWrap.style.display = "block";
+  }
+
+  scanForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const keyword = document.getElementById("scan-keyword").value.trim();
+    if (!keyword) return;
+    const count = Number(document.getElementById("scan-count").value);
+
+    scanStatusEl.className = "";
+    scanStatusEl.textContent = "";
+    scanDownloadJsonBtn.style.display = "none";
+    scanDownloadCsvBtn.style.display = "none";
+    scanResultsWrap.style.display = "none";
+    scanBtn.disabled = true;
+    scanBtn.innerHTML = '<span class="spinner"></span>Qidirilmoqda... (bir necha daqiqa vaqt olishi mumkin)';
+
+    try {
+      const res = await fetch("/api/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword, count }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        scanStatusEl.className = "error";
+        scanStatusEl.textContent = data.error || "Xatolik yuz berdi.";
+        return;
+      }
+      if (data.warning) {
+        scanStatusEl.className = "error";
+        scanStatusEl.textContent = data.warning;
+        return;
+      }
+
+      scanStatusEl.className = data.count > 0 ? "success" : "error";
+      scanStatusEl.textContent = data.count > 0
+        ? `"${data.keyword}" bo'yicha ${data.count} ta haqiqiy provayder topildi.`
+        : `"${data.keyword}" bo'yicha hech qanday tasdiqlangan provayder topilmadi.`;
+
+      renderScanResults(data.competitors);
+
+      lastScanJsonFile = data.jsonFile || null;
+      lastScanCsvContent = data.csvContent || null;
+      lastScanKeywordSlug = keyword.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "scan";
+      scanDownloadJsonBtn.style.display = data.count > 0 ? "block" : "none";
+      scanDownloadCsvBtn.style.display = data.count > 0 ? "block" : "none";
+    } catch (err) {
+      scanStatusEl.className = "error";
+      scanStatusEl.textContent = "Server bilan bog'lanib bo'lmadi: " + err.message;
+    } finally {
+      scanBtn.disabled = false;
+      scanBtn.textContent = "Tahlilni boshlash";
+    }
+  });
+
+  scanDownloadJsonBtn.addEventListener("click", () => {
+    if (lastScanJsonFile) downloadText(JSON.stringify(lastScanJsonFile, null, 2), `market-scan-${lastScanKeywordSlug}.json`, "application/json");
+  });
+
+  scanDownloadCsvBtn.addEventListener("click", () => {
+    if (lastScanCsvContent) downloadText(lastScanCsvContent, `market-scan-${lastScanKeywordSlug}.csv`, "text/csv;charset=utf-8");
   });
 </script>
 </body>

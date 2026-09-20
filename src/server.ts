@@ -14,6 +14,7 @@ import { runPipeline, finalizeExport } from "./agents/orchestrator.js";
 import { MissingApiKeyError, hasApiKey, isFatalProviderError } from "./services/llm-client.js";
 import { listCities } from "./services/location-mapper.js";
 import type { BilimOnExportRecord } from "./types/index.js";
+import { runMarketScan, marketScanToCsv } from "./agents/market-scan.js";
 
 // Uzbek display labels for the frontend's city dropdown, keyed by the real
 // CitySeed.nameEn (src/schemas/locations.ts) so the dropdown's option value
@@ -44,11 +45,18 @@ const PORT = Number(process.env.PORT ?? 3000);
 // unbounded --count from an open web form is real API spend per click.
 const MAX_COUNT = Number(process.env.PIPELINE_MAX_COUNT ?? 50);
 const MAX_BRIEF_LENGTH = 300;
+const MAX_SCAN_COUNT = Number(process.env.PIPELINE_MAX_SCAN_COUNT ?? 20);
 
 // Single-process, single-run-at-a-time: this is an internal tool, not a
 // multi-tenant service, and two overlapping runPipeline() calls would race
 // on the same data/state and data/export files.
 let runInProgress = false;
+// Separate lock for the market-scan mode: it touches entirely different
+// files (data/export/market-scan-*.json|csv, never data/state or
+// data/processed), so there's no correctness reason to serialize it behind
+// the education-pipeline lock above — just its own, so two overlapping
+// scans can't race on the same market-scan-<slug> files.
+let scanInProgress = false;
 
 function sendJson(res: ServerResponse, status: number, body: unknown) {
   const payload = JSON.stringify(body);
@@ -227,6 +235,85 @@ async function handleApiRun(req: IncomingMessage, res: ServerResponse) {
   }
 }
 
+// Keyword-driven "market scan" mode — a real user request: type a keyword
+// (e.g. "onlayn kredit") and get every real provider of it researched and
+// exported as JSON+CSV. Independent of parseRunRequest/handleApiRun's
+// BilimOn education-institution pipeline — see types/market-scan.ts's doc
+// comment for why they don't share a schema.
+export function parseScanRequest(raw: string): { keyword: string; count: number } | { error: string } {
+  let parsed: unknown;
+  try {
+    parsed = raw ? JSON.parse(raw) : {};
+  } catch {
+    return { error: "Noto'g'ri so'rov formati (JSON kutilgan)." };
+  }
+  const body = (parsed ?? {}) as Record<string, unknown>;
+
+  if (typeof body.keyword !== "string" || body.keyword.trim().length === 0) {
+    return { error: "\"keyword\" bo'sh bo'lmagan matn bo'lishi kerak." };
+  }
+  const keyword = body.keyword.trim().slice(0, MAX_BRIEF_LENGTH);
+
+  const rawCount = body.count ?? 10;
+  const count = Number(rawCount);
+  if (!Number.isFinite(count) || !Number.isInteger(count) || count < 1) {
+    return { error: "\"count\" 1 dan katta butun son bo'lishi kerak." };
+  }
+  if (count > MAX_SCAN_COUNT) {
+    return { error: `"count" ${MAX_SCAN_COUNT} dan oshmasligi kerak.` };
+  }
+
+  return { keyword, count };
+}
+
+async function handleApiScan(req: IncomingMessage, res: ServerResponse) {
+  if (scanInProgress) {
+    sendJson(res, 409, { error: "Boshqa so'rov hozir bajarilmoqda. Biroz kuting va qayta urinib ko'ring." });
+    return;
+  }
+
+  const raw = await readBody(req);
+  const parsedRequest = parseScanRequest(raw);
+  if ("error" in parsedRequest) {
+    sendJson(res, 400, { error: parsedRequest.error });
+    return;
+  }
+  const { keyword, count } = parsedRequest;
+
+  const mock = process.env.PIPELINE_MOCK === "1";
+  if (!mock && !hasApiKey()) {
+    sendJson(res, 400, { error: new MissingApiKeyError().message });
+    return;
+  }
+
+  scanInProgress = true;
+  try {
+    const result = await runMarketScan({ keyword, count, mock });
+    sendJson(res, 200, {
+      ok: true,
+      keyword,
+      count: result.competitors.length,
+      requested: count,
+      competitors: result.competitors,
+      // Both full exports are embedded directly in the response (not just a
+      // URL to fetch afterward) — same reasoning as /api/run's importFile:
+      // a host with no persistent disk can lose the on-disk copy between
+      // requests, so the browser downloads from data it already has.
+      jsonFile: result,
+      csvContent: marketScanToCsv(result),
+    });
+  } catch (err) {
+    if (isFatalProviderError(err)) {
+      sendJson(res, 200, { ok: false, warning: `So'rov to'xtatildi: ${err.info.message}` });
+      return;
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    sendJson(res, 500, { error: `Ichki xatolik: ${message}` });
+  } finally {
+    scanInProgress = false;
+  }
+}
+
 function readImportFile(importPath: string): unknown {
   try {
     return JSON.parse(readFileSync(importPath, "utf-8"));
@@ -284,6 +371,8 @@ const server = createServer((req, res) => {
       handleApiCities(res);
     } else if (req.method === "POST" && url.pathname === "/api/run") {
       await handleApiRun(req, res);
+    } else if (req.method === "POST" && url.pathname === "/api/scan") {
+      await handleApiScan(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/download") {
       handleApiDownload(res);
     } else {

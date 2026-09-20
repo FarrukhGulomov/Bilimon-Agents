@@ -1,0 +1,65 @@
+{
+  "_comment": "FIXTURE/TEST DATA ONLY — not real scraped/researched data. Keyed by normalizeNameKey(keyword); any keyword not listed here falls back to \"default\" so --mock mode is fully exercisable for any typed keyword. See agents/market-scan.ts.",
+  "byKeyword": {
+    "onlayn kredit": {
+      "competitors": [
+        {
+          "providerName": "Ipoteka Bank",
+          "productName": "Onlayn kredit",
+          "category": "bank",
+          "website": "https://ipotekabank.uz",
+          "phone": "+998712000700",
+          "interestRate": "24% yillik",
+          "loanAmountRange": "1 000 000 - 50 000 000 so'm",
+          "loanTermRange": "3 - 36 oy",
+          "requirements": ["O'zbekiston fuqaroligi", "18 yoshdan katta", "Doimiy ish joyi"],
+          "description": "Ipoteka Bank mobil ilova orqali onlayn kredit rasmiylashtirish xizmatini taklif etadi.",
+          "sourceUrls": ["https://ipotekabank.uz/kredit/onlayn"]
+        },
+        {
+          "providerName": "Kapitalbank",
+          "productName": "Tezkor kredit",
+          "category": "bank",
+          "website": "https://kapitalbank.uz",
+          "phone": "+998712000404",
+          "interestRate": "26% yillik",
+          "loanAmountRange": "500 000 - 30 000 000 so'm",
+          "loanTermRange": "1 - 24 oy",
+          "requirements": ["O'zbekiston fuqaroligi", "21 yoshdan katta"],
+          "description": "Kapitalbank ilovasi orqali daqiqalar ichida onlayn kredit olish imkoniyati.",
+          "sourceUrls": ["https://kapitalbank.uz/kredit"]
+        },
+        {
+          "providerName": "TBC Bank Uzbekistan",
+          "productName": "Onlayn kredit",
+          "category": "bank",
+          "website": "https://tbcbank.uz",
+          "phone": null,
+          "interestRate": "28% yillik",
+          "loanAmountRange": "1 000 000 - 20 000 000 so'm",
+          "loanTermRange": "6 - 36 oy",
+          "requirements": ["O'zbekiston fuqaroligi"],
+          "description": "TBC ilovasi orqali to'liq onlayn rasmiylashtiriladigan iste'mol krediti.",
+          "sourceUrls": ["https://tbcbank.uz/credit"]
+        }
+      ]
+    }
+  },
+  "default": {
+    "competitors": [
+      {
+        "providerName": "Namuna Provider LC",
+        "productName": null,
+        "category": null,
+        "website": "https://example.uz",
+        "phone": "+998901234567",
+        "interestRate": null,
+        "loanAmountRange": null,
+        "loanTermRange": null,
+        "requirements": [],
+        "description": "Mock fixture rekordi — real ma'lumot emas, faqat --mock rejimini offline sinash uchun.",
+        "sourceUrls": ["https://example.uz/about"]
+      }
+    ]
+  }
+}

@@ -33,6 +33,8 @@ import { dirname, join } from "node:path";
 import { slugify, normalizePhone, generateId, generateDuplicateBookkeepingId, generateBilimonRecordId, normalizeNameKey, normalizeLanguages, normalizeLanguageCode } from "../src/services/normalizer.js";
 import { resolveCity } from "../src/services/location-mapper.js";
 import { findCoursePageLinks, extractHeaderNavHtml } from "../src/services/link-discovery.js";
+import { toCsv } from "../src/services/csv-writer.js";
+import { runMarketScan, normalizeCompetitorFields, dedupeCandidatesByName, marketScanToCsv } from "../src/agents/market-scan.js";
 import { deterministicDedupe } from "../src/services/deduplicator.js";
 import { validateRecord, validateBatch } from "../src/services/validator.js";
 import {
@@ -74,7 +76,7 @@ import { buildExportRecord, exportFinalArtifacts } from "../src/agents/bilimon-e
 import { detectNonEducationalOrg } from "../src/services/relevance-filter.js";
 import { resolveExportIdentity, dedupeCandidates, maxTotalRaw, buildResultRow, runPipeline } from "../src/agents/orchestrator.js";
 import { selectResearchEvidenceSource } from "../src/agents/researcher.js";
-import { parseRunRequest } from "../src/server.js";
+import { parseRunRequest, parseScanRequest } from "../src/server.js";
 import type { BilimOnExportRecord, StateRecord } from "../src/types/index.js";
 import type { DiscoveryCandidate } from "../src/agents/discovery.js";
 
@@ -1833,6 +1835,91 @@ console.log("31. Real-mode research now sets deliveryMode (previously always mis
   const before = computeDataCompleteness(fieldsWithoutDeliveryMode);
   const after = computeDataCompleteness({ ...fieldsWithoutDeliveryMode, deliveryMode: "OFFLINE" });
   assert(after > before, `dataCompleteness measurably improves once deliveryMode is present (before=${before}, after=${after})`);
+}
+
+console.log("32. Keyword-driven market scan mode: CSV writer (src/services/csv-writer.ts::toCsv)");
+{
+  const csv = toCsv(
+    [
+      { name: "Ipoteka Bank", rate: "24%", tags: ["a", "b"] },
+      { name: 'Bank, "the best"', rate: null, tags: [] },
+    ],
+    [["name", "Nomi"], ["rate", "Stavka"], ["tags", "Teglar"]]
+  );
+  assert(csv.startsWith("﻿"), "output starts with a UTF-8 BOM so Excel renders non-ASCII text correctly");
+  assert(csv.includes("Nomi,Stavka,Teglar"), "header row uses the given human-readable labels, not raw keys");
+  assert(csv.includes("Ipoteka Bank,24%,a; b"), "an array cell is joined with \"; \" rather than exploded into extra columns");
+  assert(csv.includes('"Bank, ""the best"""'), "a cell containing a comma and double quotes is CSV-escaped correctly");
+  assert(csv.includes(",,"), "a null cell renders as empty, not the literal string \"null\"");
+  assert(csv.split("\r\n").length >= 3, "lines are CRLF-terminated");
+}
+
+console.log("33. Keyword-driven market scan mode: field normalization + dedupe (src/agents/market-scan.ts)");
+{
+  const normalized = normalizeCompetitorFields({
+    providerName: " Ipoteka Bank ", productName: "", interestRate: "24% yillik",
+    requirements: ["18 yoshdan katta", "", "  ", "O'zbekiston fuqaroligi"],
+    unknownField: "ignored",
+  });
+  assert(normalized.providerName === "Ipoteka Bank", "string fields are trimmed");
+  assert(normalized.productName === undefined, "an empty string is dropped, not kept as a real value");
+  assert(normalized.interestRate === "24% yillik", "a real string field is kept verbatim");
+  assert(
+    JSON.stringify(normalized.requirements) === JSON.stringify(["18 yoshdan katta", "O'zbekiston fuqaroligi"]),
+    `empty/whitespace-only requirement entries are dropped (got ${JSON.stringify(normalized.requirements)})`
+  );
+  assert(!("unknownField" in normalized), "an unrecognized field from the model's response is never carried through");
+  assert(JSON.stringify(normalizeCompetitorFields(null)) === "{}", "null input normalizes to no fields at all");
+
+  const deduped = dedupeCandidatesByName([
+    { name: "Ipoteka Bank", website: "https://ipotekabank.uz" },
+    { name: "ipoteka bank", website: null },
+    { name: "Kapitalbank", website: null },
+  ]);
+  assert(deduped.length === 2, `case/whitespace-insensitive duplicate names are merged (got ${deduped.length})`);
+}
+
+console.log("34. Keyword-driven market scan mode: end-to-end mock run + CSV export (src/agents/market-scan.ts::runMarketScan)");
+{
+  const known = await runMarketScan({ keyword: "onlayn kredit", count: 2, mock: true });
+  assert(known.keyword === "onlayn kredit", "the result echoes the requested keyword");
+  assert(known.competitors.length === 2, `--count caps the number of competitors returned (got ${known.competitors.length})`);
+  assert(known.competitors[0].providerName === "Ipoteka Bank", `a keyword with a matching mock fixture returns its real competitors (got "${known.competitors[0].providerName}")`);
+  assert(Array.isArray(known.competitors[0].requirements) && known.competitors[0].requirements.length > 0, "a mock competitor record carries its requirements array");
+
+  const unknown = await runMarketScan({ keyword: "shu keyword hech qanday fixture'da yo'q", count: 5, mock: true });
+  assert(unknown.competitors.length === 1, `an unrecognized keyword falls back to the "default" fixture rather than erroring or returning nothing (got ${unknown.competitors.length})`);
+
+  const csv = marketScanToCsv(known);
+  assert(csv.includes("Ipoteka Bank"), "marketScanToCsv renders the same competitors as the JSON result");
+  assert(csv.includes("Provayder,Mahsulot"), "marketScanToCsv uses the configured Uzbek column headers");
+}
+
+console.log("35. Web frontend request validation for market scan (src/server.ts::parseScanRequest)");
+{
+  const ok = parseScanRequest(JSON.stringify({ keyword: "onlayn kredit", count: 5 }));
+  assert(!("error" in ok) && ok.keyword === "onlayn kredit" && ok.count === 5, "a valid {keyword, count} body parses cleanly");
+
+  const defaulted = parseScanRequest(JSON.stringify({ keyword: "onlayn kredit" }));
+  assert(!("error" in defaulted) && defaulted.count === 10, "count defaults to 10 when omitted");
+
+  const missingKeyword = parseScanRequest(JSON.stringify({ count: 5 }));
+  assert("error" in missingKeyword, "a missing keyword is rejected");
+
+  const emptyKeyword = parseScanRequest(JSON.stringify({ keyword: "   ", count: 5 }));
+  assert("error" in emptyKeyword, "a whitespace-only keyword is rejected");
+
+  const nonStringKeyword = parseScanRequest(JSON.stringify({ keyword: 123, count: 5 }));
+  assert("error" in nonStringKeyword, "a non-string keyword is rejected");
+
+  const zeroCount = parseScanRequest(JSON.stringify({ keyword: "x", count: 0 }));
+  assert("error" in zeroCount, "count must be at least 1");
+
+  const tooBig = parseScanRequest(JSON.stringify({ keyword: "x", count: 10000 }));
+  assert("error" in tooBig, "count is capped (defense against an open web form driving unbounded API spend)");
+
+  const badJson = parseScanRequest("not json");
+  assert("error" in badJson, "malformed JSON is rejected with a clear error, not a crash");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

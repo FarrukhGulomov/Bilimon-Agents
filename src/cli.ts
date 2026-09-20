@@ -8,6 +8,9 @@
  *     see services/brief-parser.ts and README.md "Brief-driven discovery")
  *   pipeline validate
  *   pipeline export
+ *   pipeline scan --keyword "<so'z>" [--count N] [--mock]
+ *     (keyword-driven market/competitor scan — independent of `run`'s
+ *     BilimOn education-institution pipeline; see agents/market-scan.ts)
  */
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -16,6 +19,7 @@ import { runPipeline, finalizeExport } from "./agents/orchestrator.js";
 import { validateBatch } from "./services/validator.js";
 import type { BilimOnExportRecord } from "./types/index.js";
 import { MissingApiKeyError, hasApiKey, isFatalProviderError } from "./services/llm-client.js";
+import { runMarketScan, writeMarketScanExport } from "./agents/market-scan.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXPORT_DIR = join(__dirname, "..", "data", "export");
@@ -145,6 +149,34 @@ function maybePrintImportFile(flags: Record<string, string | boolean>, importPat
   console.log("----- END bilimon-import.json -----");
 }
 
+// Keyword-driven "market scan" mode — a real user request: type a keyword
+// (e.g. "onlayn kredit") and get every real provider of it (across banks,
+// or any industry the keyword names) researched and exported as JSON+CSV.
+// Deliberately independent of `run`'s BilimOn education-institution
+// pipeline — see types/market-scan.ts's doc comment for why.
+async function cmdScan(flags: Record<string, string | boolean>) {
+  const keyword = typeof flags.keyword === "string" ? flags.keyword.trim() : "";
+  const count = Number(flags.count ?? 10);
+  const mock = isMock(flags);
+  if (!keyword) {
+    console.error('Usage: pipeline scan --keyword "<so\'z>" [--count N] [--mock]');
+    process.exitCode = 1;
+    return;
+  }
+  if (!mock && !hasApiKey()) {
+    console.error(new MissingApiKeyError().message);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`Running market scan: keyword="${keyword}" count=${count} mock=${mock}`);
+  const result = await runMarketScan({ keyword, count, mock });
+  const { jsonPath, csvPath } = writeMarketScanExport(result);
+  console.log(`Found ${result.competitors.length} real provider(s) for "${keyword}".`);
+  console.log(`Wrote ${jsonPath}`);
+  console.log(`Wrote ${csvPath}`);
+  console.log(JSON.stringify(result, null, 2));
+}
+
 function cmdValidate() {
   const importFile = join(EXPORT_DIR, "bilimon-import.json");
   let records: BilimOnExportRecord[] = [];
@@ -188,9 +220,12 @@ async function main() {
       case "export":
         cmdExport(flags);
         break;
+      case "scan":
+        await cmdScan(flags);
+        break;
       default:
         console.log(
-          'Usage: pipeline <run|validate|export> [--count N] [--mock] [--brief "<free text>"] [--top] [--name "<institution name>"] [--kursi24-only] [--print-import]'
+          'Usage: pipeline <run|validate|export|scan> [--count N] [--mock] [--brief "<free text>"] [--top] [--name "<institution name>"] [--kursi24-only] [--print-import] [--keyword "<so\'z>" (for scan)]'
         );
         process.exitCode = command ? 1 : 0;
     }

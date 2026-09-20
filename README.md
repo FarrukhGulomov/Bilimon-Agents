@@ -499,6 +499,60 @@ npm run server
   runs would race on the same `data/state`/`data/export` files.
 - The old one-shot CLI batch is still available: `npm run cli -- run --count N [--mock] [--brief "..."]` (built) or `npx tsx src/cli.ts run ...` (dev).
 
+## Market scan: keyword-driven competitor lookup (independent of the education pipeline)
+
+Real user request: type a keyword — e.g. "onlayn kredit" — and get every
+real provider of it (banks, or any other industry the keyword names)
+researched and exported as downloadable JSON and Excel-compatible CSV.
+This is a **separate, independent mode**, not an extension of the
+education-institution pipeline above: this project's core rule is adapting
+agents to BilimOn's REAL schema, never inventing fields onto it, and a
+bank's credit product is not an education institution — forcing it into
+`bilimon-export.zod.ts`'s shape (`nameUz`, `cityId`, `programs`, ...) would
+violate that same rule in the other direction. See `src/types/market-scan.ts`
+for the full reasoning and its own schema (`CompetitorRecord`:
+providerName, productName, category, website, phone, interestRate,
+loanAmountRange, loanTermRange, requirements, description, sourceUrls).
+
+- **Architecture**: reuses the same discovery → research shape as the
+  education pipeline (`services/market-scan-llm.ts`), including the same
+  "self-report whether this is even real, discard everything if not
+  confirmed" pattern (`isRealProvider`, mirroring `isEducationInstitution`)
+  and the same bounded-retry mitigation for web-search non-determinism
+  (`MAX_RESEARCH_ATTEMPTS = 2`) that `agents/researcher.ts::researchLive`
+  uses — both patterns were hard-won fixes from real production failures in
+  the education pipeline (see "Production safety notes" below), so this
+  mode starts with them already in place rather than re-discovering them.
+- **CLI**: `npx tsx src/cli.ts scan --keyword "onlayn kredit" --count 10 [--mock]`.
+  Writes `data/export/market-scan-<slug>.json` and `.csv`.
+- **Web frontend**: a separate card/form on the same page (`public/index.html`)
+  posting to `POST /api/scan` (`{keyword, count}`), rendering into its own
+  status/table/download UI — entirely independent of the education
+  pipeline's form, status area, and download buttons above it.
+- **Excel export**: a real `.xlsx` library (SheetJS's `xlsx` package) was
+  tried and rejected — at install time it carried two unpatched
+  high-severity advisories with no fix available (prototype pollution,
+  ReDoS), both triggered by *parsing* an untrusted file, which this
+  codebase would never do here (only writing). Rather than take on a
+  permanently-vulnerable dependency for a format Excel already opens
+  natively without it, `services/csv-writer.ts` generates a dependency-free
+  CSV (UTF-8 BOM so Excel renders Uzbek/Cyrillic text correctly, proper
+  quote/comma escaping) — "download in Excel format" is satisfied without
+  the risk.
+- **Mock mode**: `data/fixtures/mock-market-scan.json`, keyed by
+  keyword — `onlayn kredit` has real-shaped fixture competitors; any other
+  keyword falls back to a generic `default` entry, so `--mock`/`PIPELINE_MOCK=1`
+  exercises this mode fully offline for any typed keyword, same convention
+  as every other mode in this codebase.
+- **Not exercised by execution in this build environment**: like every
+  other real-mode LLM call in this codebase, `discoverCompetitors`/
+  `researchCompetitor` have no live network/API access to test against
+  here — only the mock path, the CSV writer, field normalization, dedupe,
+  and request validation are actually run and verified (all covered by
+  `test/run-all.ts`). The web UI form/table/download flow WAS verified in
+  a real browser against the running server in `--mock` mode (Playwright,
+  headless Chromium) before this was considered done.
+
 ## Brief-driven discovery: a general-purpose product, not a 4-category tool
 
 Earlier versions of this pipeline scoped discovery to a fixed list —
